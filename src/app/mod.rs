@@ -1,6 +1,7 @@
 //! Window lifecycle, event routing and the application's egui layout.
 
 mod canvas;
+mod frame_rate;
 
 use std::{path::PathBuf, time::Instant};
 
@@ -52,6 +53,7 @@ struct Runtime {
     window: GlWindow,
     occluded: bool,
     canvas: canvas::CanvasWorkspace,
+    frame_rate: frame_rate::FrameRate,
 }
 
 impl Runtime {
@@ -67,6 +69,7 @@ impl Runtime {
             window,
             occluded: false,
             canvas,
+            frame_rate: frame_rate::FrameRate::default(),
         })
     }
 
@@ -83,16 +86,25 @@ impl Runtime {
         // but process input only on the first pass of this frame.
         let mut process_input = true;
         let size = self.window.window.inner_size();
+        if show_renderer_info {
+            self.frame_rate.begin_frame();
+        }
+        let fps = self.frame_rate.fps();
         self.renderer.draw(&self.window, |ui| {
             let scene = self.canvas.show(
                 ui,
                 show_renderer_info,
+                fps,
                 (size.width, size.height),
                 process_input,
             );
             process_input = false;
             scene
         })?;
+        if show_renderer_info {
+            self.frame_rate.frame_presented();
+            self.window.window.request_redraw();
+        }
         // Open the native dialog once, after egui's possibly repeated layout.
         if self.canvas.take_open_request() {
             if let Some(path) = rfd::FileDialog::new()
@@ -103,6 +115,7 @@ impl Runtime {
             {
                 self.canvas.open_pdf(path);
             }
+            self.frame_rate.reset();
             self.window.window.request_redraw();
         }
         Ok(())
@@ -180,6 +193,7 @@ impl ApplicationHandler<UserEvent> for Application {
                     && event.physical_key == PhysicalKey::Code(KeyCode::F12) =>
             {
                 self.show_renderer_info = !self.show_renderer_info;
+                runtime.frame_rate.reset();
                 runtime.window.window.request_redraw();
             }
             WindowEvent::RedrawRequested if runtime.can_draw() => {
@@ -211,8 +225,11 @@ impl ApplicationHandler<UserEvent> for Application {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         event_loop.set_control_flow(ControlFlow::Wait);
-        let Some(runtime) = &self.runtime else { return };
+        let Some(runtime) = &mut self.runtime else {
+            return;
+        };
         if !runtime.can_draw() {
+            runtime.frame_rate.reset();
             self.repaint_at = None;
             return;
         }

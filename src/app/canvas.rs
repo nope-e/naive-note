@@ -109,6 +109,7 @@ impl CanvasWorkspace {
         &mut self,
         ui: &mut egui::Ui,
         show_renderer_info: bool,
+        fps: Option<f64>,
         framebuffer: (u32, u32),
         process_input: bool,
     ) -> Option<CanvasScene> {
@@ -119,6 +120,7 @@ impl CanvasWorkspace {
             self.page,
             self.viewport,
             show_renderer_info,
+            fps,
             self.pdf.is_some() || self.pending.is_some(),
         );
         if process_input {

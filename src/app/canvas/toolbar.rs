@@ -17,6 +17,7 @@ pub(super) fn show(
     page: PageGeometry,
     viewport: Option<CanvasViewport>,
     show_renderer_info: bool,
+    fps: Option<f64>,
     has_pdf: bool,
 ) -> Option<ViewAction> {
     let mut action = ui.input(|input| {
@@ -71,16 +72,22 @@ pub(super) fn show(
             ui.label("Wheel: scroll | Ctrl+wheel: zoom | Left/middle drag: pan");
         });
         if show_renderer_info {
-            renderer_info(ui, page, viewport);
+            renderer_info(ui, page, viewport, fps);
         }
     });
     action
 }
 
-fn renderer_info(ui: &mut egui::Ui, page: PageGeometry, viewport: Option<CanvasViewport>) {
+fn renderer_info(
+    ui: &mut egui::Ui,
+    page: PageGeometry,
+    viewport: Option<CanvasViewport>,
+    fps: Option<f64>,
+) {
     let crop = page.crop_box();
+    let fps = fps.map_or_else(|| "--".to_owned(), |fps| format!("{fps:.1}"));
     ui.label(format!(
-        "Skia + egui | GL | CropBox [{:.0}, {:.0}, {:.0}, {:.0}] | UserUnit {} | Rotation {} deg | F12: hide",
+        "Skia + egui | GL | FPS: {fps} | CropBox [{:.0}, {:.0}, {:.0}, {:.0}] | UserUnit {} | Rotation {} deg | F12: hide",
         crop.min.x, crop.min.y, crop.max.x, crop.max.y,
         page.user_unit(), page.rotation().degrees(),
     ));
