@@ -1,0 +1,7 @@
+[env]
+# MuPDF and the prebuilt Skia both bundle libjpeg. MuPDF's upstream jconfig.h
+# provides FZ-prefixed symbols; enable that namespace through MSVC's trailing
+# compiler flags (_CL_), since mupdf-sys sets CL itself during MSBuild.
+_CL_ = "/DFZ_HIDE_INTERNAL_JPEG"
+# Override inherited ESP/Xtensa libclang for this Windows MSVC project.
+LIBCLANG_PATH = { value = 'D:\clang+llvm-x86_64-pc-windows-msvc\bin', force = true }
