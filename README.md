@@ -6,7 +6,7 @@ Windows 本地 PDF 手写笔记应用。已接入 MuPDF 连续纵向多页阅读
 
 需要 Windows x64、Rust 1.95 或更新版本的 MSVC 工具链、Visual Studio 2022 C++ Build Tools（v143 和 Windows SDK）、LLVM/libclang，以及支持 OpenGL 3.3 的显卡驱动。
 
-MuPDF 的绑定生成器需要桌面 LLVM 的 `libclang.dll`。[.cargo/config.toml](.cargo/config.toml) 已用 `force = true` 将 `LIBCLANG_PATH` 固定到本机桌面 LLVM 的 **bin 目录**；换机器时需调整该路径。这样即使终端继承了 ESP/Xtensa 工具链的同名环境变量，Cargo 子进程也使用桌面 LLVM。仅设置普通字符串配置不会覆盖已存在的环境变量，详见 [Cargo env 配置](https://doc.rust-lang.org/cargo/reference/config.html#env)。
+MuPDF 的绑定生成器需要桌面 LLVM 的 `libclang.dll`。[.cargo/config.toml](.cargo/config.toml) 已用 `force = true` 将 `LIBCLANG_PATH` 固定到本机桌面 LLVM 的 **bin 目录**；换机器时需调整该路径。详见 [Cargo env 配置](https://doc.rust-lang.org/cargo/reference/config.html#env)。
 
 本机对应目录为：
 
