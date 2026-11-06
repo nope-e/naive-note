@@ -42,3 +42,5 @@ cargo run --offline --locked -- 'D:\documents\多页示例.pdf'
 构建记录：格式检查、Clippy 和 52 项无窗口测试通过。最终常规构建因用户正在运行 `target/debug/naive-note.exe` 而无法覆盖；使用项目 `.scratch/multipage-build/Cargo.toml` 中指向同一源码的临时清单，以 `naive-note-multipage` 为二进制名完成离线链接构建，产物为 `target/debug/naive-note-multipage.exe`。Agent 未启动该程序。
 
 结果记录（2026-11-07）：用户反馈“视觉确认没问题”，**总体视觉已确认**；上表未单独反馈的专项结果仍待记录。
+
+缓存重构记录（2026-11-07）：整页和分块缓存直接使用两个 `ByteLru` 实例，保留独立的 64 MiB / 128 MiB 预算，移除 `PageCache` / `TileCache` 转发包装。`insert` 接收 `FnOnce(&V) -> usize`，仅在未命中时计算像素大小，不保存闭包；同键插入保留原 Arc 并刷新 LRU。单项超预算的防御处理不会清空已有缓存，编译期约束保证真实渲染的单项尺寸不超过预算。格式检查、Clippy 和 55 项无窗口测试通过。检查覆盖按字节淘汰、读取与查询的访问顺序、重复键的对象身份及跳过计费、可消耗捕获值的 FnOnce 闭包、超大条目拒收和恰好达到预算的边界。此次重构的手动回归仍待用户执行：切页后返回，再放大并静置，预期底图可复用、高清补图正常且不串页。

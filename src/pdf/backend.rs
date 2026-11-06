@@ -9,12 +9,13 @@ use mupdf::{
 use crate::document::{PageGeometry, Rect, Rotation};
 
 use super::{
-    LoadedPdf, PageBitmap, PageTile, TileKey,
+    LoadedPdf, PAGE_CACHE_BYTES, PageBitmap, PageTile, TileKey,
     tiles::{TILE_EDGE, TILE_OVERLAP},
 };
 
 // Fast full-page fallback; visible tiles supply the display's actual resolution.
 const MAX_BITMAP_EDGE: u32 = 1024;
+const _: () = assert!(MAX_BITMAP_EDGE as usize * MAX_BITMAP_EDGE as usize * 4 <= PAGE_CACHE_BYTES);
 const PREVIEW_SCALE: f32 = 1.0;
 const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
 

@@ -1,6 +1,7 @@
 //! MuPDF stays on one worker; only owned metadata and pixels cross threads.
 
 mod backend;
+mod cache;
 mod edit_data;
 pub mod probe;
 mod save;
@@ -11,8 +12,12 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::document::{PageGeometry, Rect};
 
-pub use tiles::{PageTile, TileCache, TileKey, visible_tiles};
+pub use cache::ByteLru;
+pub use tiles::{PageTile, TileKey, visible_tiles};
 pub use worker::PdfWorker;
+
+pub const PAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
+pub const TILE_CACHE_BYTES: usize = 128 * 1024 * 1024;
 
 pub struct PageBitmap {
     pub width: u32,

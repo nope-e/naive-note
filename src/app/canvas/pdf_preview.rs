@@ -1,25 +1,26 @@
 //! One render queue and bounded pixel caches for all visible PDF pages.
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use crate::{
-    pdf::{PageBitmap, PdfWorker, TileCache, TileKey, TileResponse, visible_tiles},
+    pdf::{
+        ByteLru, PAGE_CACHE_BYTES, PageBitmap, PageTile, PdfWorker, TILE_CACHE_BYTES, TileKey,
+        TileResponse, visible_tiles,
+    },
     render::CanvasScene,
 };
 
 const REFINE_DELAY: Duration = Duration::from_millis(80);
-const PREVIEW_CACHE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DETAIL_TILES: usize = 96;
 
 pub(super) struct PdfPreview {
     document: u64,
-    cache: TileCache,
-    previews: VecDeque<(u32, Arc<PageBitmap>)>,
-    preview_bytes: usize,
+    tile_cache: ByteLru<TileKey, PageTile>,
+    page_cache: ByteLru<u32, PageBitmap>,
     visible: Vec<TileKey>,
     pages: Vec<u32>,
     pending: Option<u64>,
@@ -29,12 +30,12 @@ pub(super) struct PdfPreview {
 
 impl PdfPreview {
     pub fn new(document: u64, first_page: Arc<PageBitmap>) -> Self {
-        let preview_bytes = first_page.rgba.len();
+        let mut page_cache = ByteLru::new(PAGE_CACHE_BYTES);
+        page_cache.insert(0, first_page, |page| page.rgba.len());
         Self {
             document,
-            cache: TileCache::default(),
-            previews: VecDeque::from([(0, first_page)]),
-            preview_bytes,
+            tile_cache: ByteLru::new(TILE_CACHE_BYTES),
+            page_cache,
             visible: Vec::new(),
             pages: Vec::new(),
             pending: None,
@@ -56,21 +57,13 @@ impl PdfPreview {
             self.pending = None;
         }
         for (page, bitmap) in response.previews {
-            if let Some(index) = self.previews.iter().position(|(cached, _)| *cached == page) {
-                self.preview_bytes -= self.previews.remove(index).unwrap().1.rgba.len();
-            }
-            self.preview_bytes += bitmap.rgba.len();
-            self.previews.push_back((page, bitmap));
-            while self.preview_bytes > PREVIEW_CACHE_BYTES {
-                if let Some((_, removed)) = self.previews.pop_front() {
-                    self.preview_bytes -= removed.rgba.len();
-                }
-            }
+            self.page_cache.insert(page, bitmap, |page| page.rgba.len());
         }
         match response.result {
             Ok(tiles) => {
                 for tile in tiles {
-                    self.cache.insert(tile);
+                    self.tile_cache
+                        .insert(tile.key, tile, |tile| tile.bitmap.rgba.len());
                 }
                 Ok(())
             }
@@ -79,14 +72,6 @@ impl PdfPreview {
                 Err(error)
             }
         }
-    }
-
-    fn bitmap(&mut self, page: u32) -> Option<Arc<PageBitmap>> {
-        let index = self.previews.iter().position(|(index, _)| *index == page)?;
-        let entry = self.previews.remove(index)?;
-        let bitmap = Arc::clone(&entry.1);
-        self.previews.push_back(entry);
-        Some(bitmap)
     }
 
     pub fn update(
@@ -101,7 +86,7 @@ impl PdfPreview {
         pages.sort_by_key(|page| page.abs_diff(current_page));
         let mut visible = Vec::new();
         for page in &mut scene.pages {
-            page.bitmap = self.bitmap(page.index);
+            page.bitmap = self.page_cache.get(&page.index);
             if let Some(preview) = &page.bitmap {
                 visible.extend(visible_tiles(
                     preview,
@@ -131,15 +116,12 @@ impl PdfPreview {
             .pages
             .iter()
             .copied()
-            .filter(|page| {
-                !self.failed.contains(page)
-                    && !self.previews.iter().any(|(cached, _)| cached == page)
-            })
+            .filter(|page| !self.failed.contains(page) && !self.page_cache.contains(page))
             .take(4)
             .collect();
         let mut missing = Vec::new();
         for key in &self.visible {
-            if let Some(tile) = self.cache.get(*key) {
+            if let Some(tile) = self.tile_cache.get(key) {
                 if let Some(page) = scene.pages.iter_mut().find(|page| page.index == key.page) {
                     page.tiles.push(tile);
                 }
@@ -208,20 +190,20 @@ mod tests {
         preview
             .receive(response(10, 19, 1, Arc::clone(&image), true))
             .unwrap();
-        assert!(preview.bitmap(1).is_none());
+        assert!(preview.page_cache.get(&1).is_none());
         assert_eq!(preview.pending, Some(20));
         preview
             .receive(response(10, 20, 1, Arc::clone(&image), false))
             .unwrap();
-        assert!(Arc::ptr_eq(&preview.bitmap(1).unwrap(), &image));
+        assert!(Arc::ptr_eq(&preview.page_cache.get(&1).unwrap(), &image));
         assert_eq!(preview.pending, Some(20));
         preview.receive(response(10, 20, 2, image, true)).unwrap();
-        assert!(preview.bitmap(2).is_some());
+        assert!(preview.page_cache.get(&2).is_some());
         assert_eq!(preview.pending, None);
     }
 
     #[test]
-    fn preview_cache_evicts_old_pages_within_the_shared_byte_budget() {
+    fn page_cache_evicts_old_pages_within_the_shared_byte_budget() {
         // Shared test storage checks accounting without allocating 64 MiB.
         let image = bitmap(vec![0; 1024 * 1024].into());
         let mut preview = PdfPreview::new(10, Arc::clone(&image));
@@ -231,12 +213,13 @@ mod tests {
                 .receive(response(10, 20, page, Arc::clone(&image), true))
                 .unwrap();
         }
-        preview.bitmap(0).unwrap();
+        assert!(Arc::ptr_eq(&preview.page_cache.get(&0).unwrap(), &image));
+        assert!(preview.page_cache.contains(&1));
         preview.pending = Some(21);
         preview.receive(response(10, 21, 64, image, true)).unwrap();
-        assert_eq!(preview.preview_bytes, PREVIEW_CACHE_BYTES);
-        assert!(preview.bitmap(0).is_some());
-        assert!(preview.bitmap(1).is_none());
-        assert!(preview.bitmap(64).is_some());
+        assert_eq!(preview.page_cache.used_bytes(), PAGE_CACHE_BYTES);
+        assert!(preview.page_cache.contains(&0));
+        assert!(!preview.page_cache.contains(&1));
+        assert!(preview.page_cache.contains(&64));
     }
 }

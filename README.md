@@ -101,7 +101,8 @@ cargo run --offline --locked -- --pdf-inspect '.scratch\pdf-save-probe\<UUID>\pr
 | `src/platform/` | 原生窗口、GL 上下文、窗口 surface、vsync 与交换缓冲 |
 | `src/render/` | egui 输入和绘制、共享 GL 状态切换、Skia 帧缓冲包装与资源释放 |
 | `src/pdf/` | MuPDF worker、内存会话快照、各页几何、有界显示列表及 RGBA8 预览/分块 |
-| `src/pdf/tiles.rs` | 可见分块与 DPI 档位计算、128 MiB CPU 像素 LRU |
+| `src/pdf/cache.rs` | 通用按字节计费的 LRU；插入时用 FnOnce 按需计算大小，同键保留原 Arc 并刷新访问顺序 |
+| `src/pdf/tiles.rs` | 分块键、像素类型、可见分块与 DPI 档位计算 |
 | `src/pdf/save.rs` / `src/pdf/edit_data.rs` | Ink 和自定义 AP、CBOR＋Zstd 附件、保存后回读及指纹核验 |
 | `src/pdf/probe.rs` | 无窗口生成与检查保存样本，输出限于项目 `.scratch` |
 

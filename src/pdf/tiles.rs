@@ -1,14 +1,15 @@
-//! Visible-region planning and an owned-pixel LRU. No engine or window access.
-
-use std::{collections::VecDeque, sync::Arc};
+//! Page tiles and visible-region planning. No engine or window access.
 
 use crate::document::{CanvasViewport, PageGeometry, Point, Rect, ViewTransform};
 
-use super::PageBitmap;
+use super::{PageBitmap, TILE_CACHE_BYTES};
 
 pub const TILE_EDGE: u32 = 512;
 pub const TILE_OVERLAP: u32 = 2;
-pub const TILE_CACHE_BYTES: usize = 128 * 1024 * 1024;
+const _: () = assert!(
+    (TILE_EDGE + TILE_OVERLAP * 2) as usize * (TILE_EDGE + TILE_OVERLAP * 2) as usize * 4
+        <= TILE_CACHE_BYTES
+);
 // Leave headroom for overlap, the preview and temporary buffers. Very large
 // viewports use a lower level rather than thrashing a cache smaller than a frame.
 const MAX_VISIBLE_TILES: usize = 96;
@@ -122,38 +123,13 @@ pub fn visible_tiles(
     }
 }
 
-#[derive(Default)]
-pub struct TileCache {
-    entries: VecDeque<Arc<PageTile>>,
-    bytes: usize,
-}
-
-impl TileCache {
-    pub fn get(&mut self, key: TileKey) -> Option<Arc<PageTile>> {
-        let index = self.entries.iter().position(|tile| tile.key == key)?;
-        let tile = self.entries.remove(index)?;
-        self.entries.push_back(Arc::clone(&tile));
-        Some(tile)
-    }
-
-    pub fn insert(&mut self, tile: Arc<PageTile>) {
-        if self.get(tile.key).is_some() || tile.bitmap.rgba.len() > TILE_CACHE_BYTES {
-            return;
-        }
-        self.bytes += tile.bitmap.rgba.len();
-        self.entries.push_back(tile);
-        while self.bytes > TILE_CACHE_BYTES {
-            if let Some(removed) = self.entries.pop_front() {
-                self.bytes -= removed.bitmap.rgba.len();
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::document::Rotation;
+    use crate::pdf::ByteLru;
 
     fn preview() -> PageBitmap {
         PageBitmap {
@@ -251,13 +227,13 @@ mod tests {
 
     #[test]
     fn cache_reuses_pixels_and_evicts_least_recently_used_tiles() {
-        let mut cache = TileCache::default();
+        let mut cache = ByteLru::new(TILE_CACHE_BYTES);
         let mut bitmap = preview();
         // Shared allocation keeps the test small; accounting is per tile payload.
         bitmap.rgba = vec![0; 1024 * 1024].into();
         let pixels = Arc::clone(&bitmap.rgba);
         for x in 0..128 {
-            cache.insert(Arc::new(PageTile {
+            let tile = Arc::new(PageTile {
                 key: TileKey {
                     page: 0,
                     level: 8,
@@ -268,7 +244,8 @@ mod tests {
                     rgba: Arc::clone(&pixels),
                     ..preview()
                 },
-            }));
+            });
+            cache.insert(tile.key, tile, |tile| tile.bitmap.rgba.len());
         }
         let oldest = TileKey {
             page: 0,
@@ -276,9 +253,9 @@ mod tests {
             x: 0,
             y: 0,
         };
-        let reused = cache.get(oldest).unwrap();
+        let reused = cache.get(&oldest).unwrap();
         assert!(Arc::ptr_eq(&pixels, &reused.bitmap.rgba));
-        cache.insert(Arc::new(PageTile {
+        let tile = Arc::new(PageTile {
             key: TileKey {
                 page: 0,
                 level: 8,
@@ -286,11 +263,12 @@ mod tests {
                 y: 0,
             },
             bitmap,
-        }));
-        assert_eq!(cache.bytes, TILE_CACHE_BYTES);
+        });
+        cache.insert(tile.key, tile, |tile| tile.bitmap.rgba.len());
+        assert_eq!(cache.used_bytes(), TILE_CACHE_BYTES);
         assert!(
             cache
-                .get(TileKey {
+                .get(&TileKey {
                     page: 0,
                     level: 8,
                     x: 1,
@@ -298,14 +276,16 @@ mod tests {
                 })
                 .is_none()
         );
-        assert!(Arc::ptr_eq(&reused, &cache.get(oldest).unwrap()));
-        cache.insert(Arc::clone(&reused));
-        assert_eq!(cache.bytes, TILE_CACHE_BYTES);
+        assert!(Arc::ptr_eq(&reused, &cache.get(&oldest).unwrap()));
+        cache.insert(reused.key, Arc::clone(&reused), |tile| {
+            tile.bitmap.rgba.len()
+        });
+        assert_eq!(cache.used_bytes(), TILE_CACHE_BYTES);
     }
 
     #[test]
     fn identical_tile_coordinates_on_different_pages_have_separate_cache_entries() {
-        let mut cache = TileCache::default();
+        let mut cache = ByteLru::new(TILE_CACHE_BYTES);
         let key = TileKey {
             page: 0,
             level: 3,
@@ -320,11 +300,13 @@ mod tests {
             key: TileKey { page: 1, ..key },
             bitmap: preview(),
         });
-        cache.insert(Arc::clone(&first));
-        cache.insert(Arc::clone(&second));
-        assert!(Arc::ptr_eq(&cache.get(key).unwrap(), &first));
+        cache.insert(first.key, Arc::clone(&first), |tile| tile.bitmap.rgba.len());
+        cache.insert(second.key, Arc::clone(&second), |tile| {
+            tile.bitmap.rgba.len()
+        });
+        assert!(Arc::ptr_eq(&cache.get(&key).unwrap(), &first));
         assert!(Arc::ptr_eq(
-            &cache.get(TileKey { page: 1, ..key }).unwrap(),
+            &cache.get(&TileKey { page: 1, ..key }).unwrap(),
             &second
         ));
         let viewport =
