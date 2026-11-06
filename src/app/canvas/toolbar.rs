@@ -1,17 +1,16 @@
-//! Toolbar widgets produce view actions; the workspace applies them.
+//! Toolbar widgets and shortcuts produce document or view actions.
 
 use crate::{
     app::frame_scheduler::MAX_FPS,
     document::{CanvasViewport, PageGeometry, Point},
 };
 
-pub(super) enum ViewAction {
+use super::view::ViewAction;
+
+pub(super) enum ToolbarAction {
     Open,
     Close,
-    Fit,
-    ActualSize,
-    Zoom(f64),
-    Rotate,
+    View(ViewAction),
 }
 
 pub(super) fn show(
@@ -22,16 +21,16 @@ pub(super) fn show(
     show_renderer_info: bool,
     fps: Option<f64>,
     has_pdf: bool,
-) -> Option<ViewAction> {
+) -> Option<ToolbarAction> {
     let mut action = ui.input(|input| {
         if input.modifiers.ctrl && input.key_pressed(egui::Key::O) {
-            Some(ViewAction::Open)
+            Some(ToolbarAction::Open)
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::W) {
-            Some(ViewAction::Close)
+            Some(ToolbarAction::Close)
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::Num0) {
-            Some(ViewAction::Fit)
+            Some(ToolbarAction::View(ViewAction::Fit))
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::Num1) {
-            Some(ViewAction::ActualSize)
+            Some(ToolbarAction::View(ViewAction::ActualSize))
         } else {
             None
         }
@@ -42,34 +41,34 @@ pub(super) fn show(
             ui.strong("Naive Note");
             ui.separator();
             if ui.button("Open PDF").on_hover_text("Ctrl+O").clicked() {
-                action = Some(ViewAction::Open);
+                action = Some(ToolbarAction::Open);
             }
             if ui
                 .add_enabled(has_pdf, egui::Button::new("Close PDF"))
                 .on_hover_text("Ctrl+W")
                 .clicked()
             {
-                action = Some(ViewAction::Close);
+                action = Some(ToolbarAction::Close);
             }
             ui.separator();
             if ui.button("Fit page").on_hover_text("Ctrl+0").clicked() {
-                action = Some(ViewAction::Fit);
+                action = Some(ToolbarAction::View(ViewAction::Fit));
             }
             if ui.button("100%").on_hover_text("Ctrl+1").clicked() {
-                action = Some(ViewAction::ActualSize);
+                action = Some(ToolbarAction::View(ViewAction::ActualSize));
             }
             if ui.button("-").clicked() {
-                action = Some(ViewAction::Zoom(1.0 / 1.2));
+                action = Some(ToolbarAction::View(ViewAction::Zoom(1.0 / 1.2)));
             }
             ui.add_sized(
                 [48.0, 18.0],
                 egui::Label::new(format!("{:.0}%", zoom * 100.0)),
             );
             if ui.button("+").clicked() {
-                action = Some(ViewAction::Zoom(1.2));
+                action = Some(ToolbarAction::View(ViewAction::Zoom(1.2)));
             }
             if ui.button("Rotate 90 deg").clicked() {
-                action = Some(ViewAction::Rotate);
+                action = Some(ToolbarAction::View(ViewAction::Rotate));
             }
             ui.separator();
             ui.label("Wheel: scroll | Ctrl+wheel: zoom | Left/middle drag: pan");

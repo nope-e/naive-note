@@ -68,8 +68,10 @@ MuPDF 仅启用 `base14-fonts + system-fonts`，保留 PDF 支持及 Windows 字
 | `src/main.rs` | 日志与程序入口 |
 | `src/app/` | 窗口生命周期、事件路由、按需重绘和 UI 布局 |
 | `src/app/frame_scheduler.rs` | 60 FPS 上限、合并重绘期限；纯时间计算，无窗口操作 |
-| `src/app/canvas.rs` | 组织画布组件、更新页面和视图状态、生成 `CanvasScene` |
-| `src/app/canvas/toolbar.rs` | 工具栏、快捷键、渲染信息；返回视图操作 |
+| `src/app/canvas.rs` | 组织画布布局、路由文档与视图操作、组装 `CanvasScene` |
+| `src/app/canvas/document.rs` | PDF 打开/关闭、worker 结果与状态消息、当前文档和预览生命周期 |
+| `src/app/canvas/view.rs` | 页面视图状态、适合页面、缩放/平移/旋转、布局重定位及指针坐标换算 |
+| `src/app/canvas/toolbar.rs` | 工具栏、快捷键、渲染信息；区分文档操作与视图操作 |
 | `src/app/canvas/status_bar.rs` | 页面、缩放和指针坐标的只读状态显示 |
 | `src/app/canvas/area.rs` | 中央区域布局、输入归属、拖动和滚轮手势；返回交互结果 |
 | `src/app/canvas/pdf_preview.rs` | 高清补图防抖、请求生命周期及过时结果过滤 |
