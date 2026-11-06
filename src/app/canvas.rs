@@ -3,6 +3,7 @@
 mod area;
 mod document;
 mod pdf_preview;
+mod scrollbars;
 mod status_bar;
 mod toolbar;
 mod view;
@@ -124,16 +125,14 @@ impl CanvasWorkspace {
             self.document.message(),
         );
 
+        let view_action = match action {
+            Some(ToolbarAction::View(action)) => Some(action),
+            _ => None,
+        };
         let scene = self
             .area
-            .show(ui, framebuffer, process_input, action.is_some())
-            .map(|response| {
-                let viewport = response.viewport;
-                self.view.update_viewport(viewport);
-                if process_input && let Some(ToolbarAction::View(action)) = action {
-                    self.view.apply_action(action, viewport.logical);
-                }
-                self.view.apply_interaction(response);
+            .show(ui, framebuffer, process_input, &mut self.view, view_action)
+            .map(|viewport| {
                 let mut scene = CanvasScene {
                     viewport,
                     pages: self.view.scenes(viewport, !self.document.is_loaded()),

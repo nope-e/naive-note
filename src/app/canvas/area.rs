@@ -1,10 +1,16 @@
-//! Central canvas layout and input ownership. Emits gestures in logical coordinates.
+//! Central canvas layout and input ownership. Routes logical gestures to the view.
 
 use crate::document::{CanvasViewport, Point, Rect};
+
+use super::{
+    scrollbars::Scrollbars,
+    view::{CanvasView, ViewAction},
+};
 
 #[derive(Default)]
 pub(super) struct CanvasArea {
     wheel_owned: bool,
+    scrollbars: Scrollbars,
 }
 
 pub(super) struct ZoomGesture {
@@ -25,13 +31,31 @@ impl CanvasArea {
         ui: &mut egui::Ui,
         framebuffer: (u32, u32),
         process_input: bool,
-        clear_wheel: bool,
-    ) -> Option<CanvasResponse> {
+        view: &mut CanvasView,
+        action: Option<ViewAction>,
+    ) -> Option<CanvasViewport> {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ui, |ui| {
-                let (rect, response) =
-                    ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+                let (outer, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+                // Keep both lanes reserved so showing/hiding a thumb cannot
+                // change the viewport or move the pointer's zoom anchor.
+                let thickness = ui
+                    .spacing()
+                    .scroll
+                    .bar_width
+                    .max(12.0)
+                    .min(outer.width() * 0.5)
+                    .min(outer.height() * 0.5);
+                let rect = egui::Rect::from_min_max(
+                    outer.min,
+                    outer.max - egui::vec2(thickness, thickness),
+                );
+                let response = ui.interact(
+                    rect,
+                    ui.scope_id().with("canvas_area"),
+                    egui::Sense::click_and_drag(),
+                );
                 let logical = Rect::new(
                     f64::from(rect.min.x),
                     f64::from(rect.min.y),
@@ -43,6 +67,11 @@ impl CanvasArea {
                     f64::from(ui.ctx().pixels_per_point()),
                     framebuffer,
                 )?;
+                view.update_viewport(viewport);
+                let clear_wheel = action.is_some();
+                if process_input && let Some(action) = action {
+                    view.apply_action(action, viewport.logical);
+                }
 
                 if process_input {
                     if clear_wheel {
@@ -96,12 +125,30 @@ impl CanvasArea {
                     } else {
                         (None, None)
                     };
-                Some(CanvasResponse {
+                view.apply_interaction(CanvasResponse {
                     viewport,
                     drag_delta,
                     zoom,
                     scroll_delta,
-                })
+                });
+                let tracks = [
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x, rect.max.y),
+                        egui::pos2(rect.max.x, outer.max.y),
+                    ),
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.max.x, rect.min.y),
+                        egui::pos2(outer.max.x, rect.max.y),
+                    ),
+                ];
+                let offsets = self.scrollbars.show(
+                    ui,
+                    tracks,
+                    view.scroll_axes(viewport.logical),
+                    process_input,
+                );
+                view.apply_scroll_offsets(viewport.logical, offsets);
+                Some(viewport)
             })
             .inner
     }

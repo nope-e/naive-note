@@ -39,6 +39,7 @@ cargo run --locked -- 'D:\documents\中文示例.pdf'
 | `Pressure demo` | 在第一页添加或移除一条模拟压感叠加笔迹 |
 | `Export test PDF` | 将该笔迹保存到项目 `.scratch/pdf-save-probe/<UUID>/pressure.pdf`，校验后自动打开副本 |
 | 滚轮 / Shift＋滚轮 | 纵向 / 横向滚动 |
+| 右侧 / 底部滚动条 | 拖动滑块或点击轨道定位；该方向无可滚动范围时隐藏，页码随纵向位置更新 |
 | 左键或中键拖动中央画布 | 平移纸面 |
 | Ctrl＋滚轮 | 以鼠标位置为锚点缩放，范围 10%—800% |
 | `Fit page` / Ctrl＋0 | 适合当前页，随窗口尺寸调整 |
@@ -94,7 +95,8 @@ cargo run --offline --locked -- --pdf-inspect '.scratch\pdf-save-probe\<UUID>\pr
 | `src/app/canvas/view.rs` | 页面视图状态、适合页面、缩放/平移/旋转、布局重定位及指针坐标换算 |
 | `src/app/canvas/toolbar.rs` | 工具栏、快捷键、渲染信息；区分文档操作与视图操作 |
 | `src/app/canvas/status_bar.rs` | 页面、缩放和指针坐标的只读状态显示 |
-| `src/app/canvas/area.rs` | 中央区域布局、输入归属、拖动和滚轮手势；返回交互结果 |
+| `src/app/canvas/area.rs` | 中央区域和滚动条布局、输入归属，将拖动、滚轮和滚动条操作交给视图 |
+| `src/app/canvas/scrollbars.rs` | 滚动条滑块、轨道点击与拖动；使用视图提供的范围和偏移 |
 | `src/app/canvas/pdf_preview.rs` | 高清补图防抖、请求生命周期及过时结果过滤 |
 | `src/document/` | 页面几何、连续页面布局、可见页查找、CropBox / 旋转 / UserUnit 与坐标转换 |
 | `src/document/stroke.rs` / `src/ink/` | 最小笔迹模型、原始采样、参数快照、可序列化轮廓和模拟压力样本 |
