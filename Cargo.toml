@@ -7,6 +7,7 @@ description = "A local PDF handwriting application built with egui and Skia"
 
 [dependencies]
 anyhow = "1.0"
+ciborium = "0.2.2"
 egui = { version = "=0.37.0", features = ["default_fonts"] }
 egui-winit = { version = "=0.37.0", default-features = false }
 egui_glow = "=0.37.0"
@@ -17,9 +18,13 @@ log = "0.4"
 mupdf = { version = "=0.8.0", default-features = false, features = ["base14-fonts", "system-fonts"] }
 raw-window-handle = "0.6"
 rfd = { version = "=0.17.2", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+sha2 = "0.11.1"
 # Match an upstream Windows binary-cache artifact; GL alone is not published.
 skia-safe = { version = "=0.157.0", default-features = false, features = ["binary-cache", "gl", "pdf"] }
+uuid = { version = "1.29.0", features = ["v4", "serde"] }
 winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }
+zstd = "0.14.3"
 
 # Skia's published Windows binaries use the release CRT. Match it in MuPDF,
 # including cargo test, while keeping our own Rust code in the debug profile.

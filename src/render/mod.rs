@@ -25,6 +25,7 @@ pub struct CanvasScene {
     pub view: ViewTransform,
     pub bitmap: Option<Arc<PageBitmap>>,
     pub tiles: Vec<Arc<PageTile>>,
+    pub demo_stroke: Option<Arc<crate::document::StrokeRecord>>,
 }
 
 pub struct Renderer {

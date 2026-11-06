@@ -10,7 +10,10 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use super::{OpenResponse, PdfResponse, TileKey, TileResponse, backend::PdfSession};
+use super::{
+    ExportResponse, OpenResponse, PdfResponse, TileKey, TileResponse, backend::PdfSession,
+};
+use crate::document::StrokeRecord;
 
 enum Command {
     Open {
@@ -23,6 +26,12 @@ enum Command {
         keys: Vec<TileKey>,
     },
     Close,
+    ExportProbe {
+        document: u64,
+        request: u64,
+        lifecycle: u64,
+        stroke: Arc<StrokeRecord>,
+    },
     Shutdown,
 }
 
@@ -113,6 +122,37 @@ impl PdfWorker {
                                 }));
                             }
                         }
+                        Command::ExportProbe {
+                            document,
+                            request,
+                            lifecycle,
+                            stroke,
+                        } => {
+                            if lifecycle != worker_latest.load(Ordering::Acquire) {
+                                continue;
+                            }
+                            let Some((id, opened)) = session.as_ref() else {
+                                continue;
+                            };
+                            if *id != document {
+                                continue;
+                            }
+                            let result = super::probe::output_directory()
+                                .and_then(|directory| {
+                                    let path = directory.join("pressure.pdf");
+                                    opened.export_probe(&stroke, &path)?;
+                                    Ok(path)
+                                })
+                                .map_err(|error| {
+                                    log::warn!("PDF save probe failed: {error:#}");
+                                    format!("{error:#}")
+                                });
+                            deliver(PdfResponse::Exported(ExportResponse {
+                                document,
+                                request,
+                                result,
+                            }));
+                        }
                         Command::Close => {
                             session.take();
                         }
@@ -162,6 +202,19 @@ impl PdfWorker {
         let request = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed) + 1;
         self.latest_render.store(request, Ordering::Release);
         request
+    }
+
+    pub fn export_probe(&self, document: u64, stroke: Arc<StrokeRecord>) -> Result<u64> {
+        let request = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed) + 1;
+        self.sender
+            .send(Command::ExportProbe {
+                document,
+                request,
+                lifecycle: self.latest.load(Ordering::Acquire),
+                stroke,
+            })
+            .context("MuPDF worker stopped")?;
+        Ok(request)
     }
 
     fn invalidate(&self) -> u64 {

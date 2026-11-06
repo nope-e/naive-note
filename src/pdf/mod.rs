@@ -1,6 +1,9 @@
 //! MuPDF stays on one worker; only owned metadata and pixels cross threads.
 
 mod backend;
+mod edit_data;
+pub mod probe;
+mod save;
 mod tiles;
 mod worker;
 
@@ -26,6 +29,7 @@ pub struct LoadedPdf {
     pub path: PathBuf,
     pub page_count: u32,
     pub first_page: Arc<PageBitmap>,
+    pub edit_data_status: String,
 }
 
 pub struct OpenResponse {
@@ -39,7 +43,14 @@ pub struct TileResponse {
     pub result: Result<Vec<Arc<PageTile>>, String>,
 }
 
+pub struct ExportResponse {
+    pub document: u64,
+    pub request: u64,
+    pub result: Result<std::path::PathBuf, String>,
+}
+
 pub enum PdfResponse {
     Opened(OpenResponse),
     Tiles(TileResponse),
+    Exported(ExportResponse),
 }

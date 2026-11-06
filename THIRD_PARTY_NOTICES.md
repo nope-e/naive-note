@@ -8,6 +8,11 @@
 | `mupdf-sys` | 0.8.0，内置 `fitz/version.h` 标记的 MuPDF 1.27.2 | AGPL-3.0；MuPDF 源文件另有上游许可条款 |
 | MuPDF | [Artifex / MuPDF](https://mupdf.com/)，由上述 sys crate 源码编译链接 | 上游提供 GNU AGPL 和商业许可选项，见[官方许可说明](https://mupdf.readthedocs.io/en/latest/license.html) |
 | `rfd` 原生文件对话框 | [rfd 0.17.2](https://github.com/PolyMeilex/rfd) | [MIT](licenses/rfd-MIT.txt) |
+| `serde` 序列化 | [serde 1.0.229](https://github.com/serde-rs/serde) | MIT OR Apache-2.0 |
+| `ciborium` CBOR | [ciborium 0.2.2](https://github.com/enarx/ciborium) | Apache-2.0 |
+| `zstd` 编辑附件压缩 | [zstd-rs 0.14.3](https://github.com/gyscos/zstd-rs) | BSD-3-Clause；内置 Zstandard 另有上游许可 |
+| `uuid` 文档与笔迹标识 | [uuid 1.29.0](https://github.com/uuid-rs/uuid) | MIT OR Apache-2.0 |
+| `sha2` 批注指纹 | [sha2 0.11.1](https://github.com/RustCrypto/hashes) | MIT OR Apache-2.0 |
 
 AGPL 全文见 [licenses/MuPDF-AGPL-3.0.txt](licenses/MuPDF-AGPL-3.0.txt)。接入 MuPDF 没有替项目自动选择或更改根许可证；发布版本需要落实适用许可、完整第三方声明及对应源码的提供方式。MuPDF 包中的第三方库另有各自许可，制作发行包时需从锁定版本的 `mupdf-sys/mupdf` 源码一并汇总。
 

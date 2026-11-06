@@ -303,3 +303,108 @@ fn invalid_pdf_and_empty_document_return_errors() {
     empty.write_to(&mut bytes).unwrap();
     assert!(PdfSession::from_bytes(&bytes).is_err());
 }
+
+#[test]
+fn worker_exports_snapshot_and_keeps_preview_session_available() {
+    use crate::{
+        ink::demo_stroke,
+        pdf::{PdfResponse, PdfWorker},
+    };
+    use std::{sync::mpsc, time::Duration};
+
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".scratch")
+        .join(format!("mupdf-save-worker-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("source.pdf");
+    let bytes = pdf_bytes("/MediaBox [0 0 200 300] /Rotate 90");
+    std::fs::write(&source, &bytes).unwrap();
+    let geometry = PdfSession::from_bytes(&bytes).unwrap().geometry;
+    let (sender, receiver) = mpsc::channel();
+    let worker = PdfWorker::new(move |response| {
+        sender.send(response).unwrap();
+    })
+    .unwrap();
+    let document = worker.open(source.clone()).unwrap();
+    assert!(
+        matches!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), PdfResponse::Opened(response) if response.result.is_ok())
+    );
+    let request = worker
+        .export_probe(document, Arc::new(demo_stroke(geometry).unwrap()))
+        .unwrap();
+    let output = match receiver.recv_timeout(Duration::from_secs(5)).unwrap() {
+        PdfResponse::Exported(response) => {
+            assert_eq!(response.document, document);
+            assert_eq!(response.request, request);
+            response.result.unwrap()
+        }
+        _ => panic!("expected PDF export response"),
+    };
+    assert_eq!(std::fs::read(&source).unwrap(), bytes);
+    let reopened = PdfDocument::from_bytes(&std::fs::read(&output).unwrap()).unwrap();
+    assert!(
+        super::super::save::read_edit_data(&reopened)
+            .unwrap()
+            .is_some()
+    );
+    // Export does not mutate the current immutable session or stop refinement.
+    worker
+        .render(
+            document,
+            vec![TileKey {
+                level: 0,
+                x: 0,
+                y: 0,
+            }],
+        )
+        .unwrap();
+    assert!(
+        matches!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), PdfResponse::Tiles(response) if response.result.is_ok())
+    );
+    drop(worker);
+    std::fs::remove_file(&output).unwrap();
+    std::fs::remove_dir(output.parent().unwrap()).unwrap();
+    std::fs::remove_file(source).unwrap();
+    std::fs::remove_dir(directory).unwrap();
+}
+
+#[test]
+fn close_invalidates_queued_test_export() {
+    use crate::{
+        ink::demo_stroke,
+        pdf::{PdfResponse, PdfWorker},
+    };
+    use std::{sync::mpsc, time::Duration};
+
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".scratch")
+        .join(format!("mupdf-cancel-save-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("source.pdf");
+    let bytes = pdf_bytes("/MediaBox [0 0 200 300]");
+    std::fs::write(&source, &bytes).unwrap();
+    let geometry = PdfSession::from_bytes(&bytes).unwrap().geometry;
+    let (sender, receiver) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let worker = PdfWorker::new(move |response| {
+        sender.send(response).unwrap();
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+    })
+    .unwrap();
+    let document = worker.open(source.clone()).unwrap();
+    assert!(
+        matches!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), PdfResponse::Opened(response) if response.result.is_ok())
+    );
+    worker
+        .export_probe(document, Arc::new(demo_stroke(geometry).unwrap()))
+        .unwrap();
+    worker.close();
+    release.send(()).unwrap();
+    assert!(matches!(
+        receiver.recv_timeout(Duration::from_millis(150)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    drop(worker);
+    std::fs::remove_file(source).unwrap();
+    std::fs::remove_dir(directory).unwrap();
+}

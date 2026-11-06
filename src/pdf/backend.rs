@@ -19,6 +19,7 @@ const PREVIEW_SCALE: f32 = 2.0;
 const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
 
 pub(super) struct PdfSession {
+    base: Arc<[u8]>,
     document: PdfDocument,
     geometry: PageGeometry,
     bounds: mupdf::Rect,
@@ -45,7 +46,7 @@ impl PdfSession {
         Self::from_bytes(&bytes)
     }
 
-    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+    pub(super) fn from_bytes(bytes: &[u8]) -> Result<Self> {
         let document = PdfDocument::from_bytes(bytes).context("Cannot parse PDF")?;
         ensure!(
             !document.needs_password()?,
@@ -67,11 +68,20 @@ impl PdfSession {
             .to_display_list(true)
             .context("Cannot prepare PDF page")?;
         Ok(Self {
+            base: bytes.into(),
             document,
             geometry,
             bounds,
             display_list,
         })
+    }
+
+    pub fn export_probe(
+        &self,
+        stroke: &crate::document::StrokeRecord,
+        path: &Path,
+    ) -> Result<String> {
+        super::save::save_probe(&self.base, stroke, path)
     }
 
     #[cfg(test)]
@@ -102,6 +112,7 @@ impl PdfSession {
         Ok(LoadedPdf {
             path: path.to_owned(),
             page_count: u32::try_from(self.document.page_count()?)?,
+            edit_data_status: super::save::edit_data_status(&self.document),
             first_page: Arc::new(PageBitmap {
                 width,
                 height,
@@ -187,7 +198,7 @@ fn rgba_pixels(pixmap: &Pixmap) -> Result<Vec<u8>> {
     Ok(rgba)
 }
 
-fn page_geometry(page: &PdfPage) -> Result<PageGeometry> {
+pub(super) fn page_geometry(page: &PdfPage) -> Result<PageGeometry> {
     // Derive the effective CropBox from MuPDF itself: it intersects MediaBox,
     // honors inherited page attributes and applies its malformed-box fallback.
     // PdfPage::crop_box() in 0.8.0 mixes rotated bounds with unrotated offsets.

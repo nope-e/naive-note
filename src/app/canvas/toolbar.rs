@@ -10,7 +10,15 @@ use super::view::ViewAction;
 pub(super) enum ToolbarAction {
     Open,
     Close,
+    DemoStroke,
+    ExportDemo,
     View(ViewAction),
+}
+
+pub(super) struct DocumentActions {
+    pub can_close: bool,
+    pub can_demo: bool,
+    pub can_export_demo: bool,
 }
 
 pub(super) fn show(
@@ -20,7 +28,7 @@ pub(super) fn show(
     viewport: Option<CanvasViewport>,
     show_renderer_info: bool,
     fps: Option<f64>,
-    has_pdf: bool,
+    document: DocumentActions,
 ) -> Option<ToolbarAction> {
     let mut action = ui.input(|input| {
         if input.modifiers.ctrl && input.key_pressed(egui::Key::O) {
@@ -44,11 +52,31 @@ pub(super) fn show(
                 action = Some(ToolbarAction::Open);
             }
             if ui
-                .add_enabled(has_pdf, egui::Button::new("Close PDF"))
+                .add_enabled(document.can_close, egui::Button::new("Close PDF"))
                 .on_hover_text("Ctrl+W")
                 .clicked()
             {
                 action = Some(ToolbarAction::Close);
+            }
+            ui.separator();
+            if ui
+                .add_enabled(document.can_demo, egui::Button::new("Pressure demo"))
+                .on_hover_text("Toggle one simulated pressure stroke")
+                .clicked()
+            {
+                action = Some(ToolbarAction::DemoStroke);
+            }
+            if ui
+                .add_enabled(
+                    document.can_export_demo,
+                    egui::Button::new("Export test PDF"),
+                )
+                .on_hover_text(
+                    "Save a verified copy in the project's .scratch folder and reopen it",
+                )
+                .clicked()
+            {
+                action = Some(ToolbarAction::ExportDemo);
             }
             ui.separator();
             if ui.button("Fit page").on_hover_text("Ctrl+0").clicked() {

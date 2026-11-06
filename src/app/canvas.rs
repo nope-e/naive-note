@@ -74,7 +74,11 @@ impl CanvasWorkspace {
             self.view.viewport,
             show_renderer_info,
             fps,
-            self.document.can_close(),
+            toolbar::DocumentActions {
+                can_close: self.document.can_close(),
+                can_demo: self.document.can_demo(),
+                can_export_demo: self.document.can_export_demo(),
+            },
         );
         if process_input {
             match action {
@@ -84,6 +88,14 @@ impl CanvasWorkspace {
                 }
                 Some(ToolbarAction::Close) => {
                     self.close_pdf();
+                    action = None;
+                }
+                Some(ToolbarAction::DemoStroke) => {
+                    self.document.toggle_demo();
+                    action = None;
+                }
+                Some(ToolbarAction::ExportDemo) => {
+                    self.document.export_demo();
                     action = None;
                 }
                 _ => {}
@@ -122,6 +134,7 @@ impl CanvasWorkspace {
                     view: self.view.transform,
                     bitmap: None,
                     tiles: Vec::new(),
+                    demo_stroke: None,
                 };
                 self.document.update_scene(ui.ctx(), &mut scene);
                 scene

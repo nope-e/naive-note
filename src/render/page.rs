@@ -5,7 +5,7 @@ use skia_safe::{
 };
 
 use super::{CanvasScene, test_page};
-use crate::document::Point;
+use crate::document::{PathCommand, Point, StrokeRecord};
 
 pub(super) fn draw(
     canvas: &Canvas,
@@ -106,6 +106,9 @@ pub(super) fn draw(
             );
             canvas.restore();
         }
+        if let Some(stroke) = &scene.demo_stroke {
+            draw_stroke(canvas, stroke);
+        }
     } else {
         test_page::draw_contents(canvas, scene.page);
     }
@@ -117,4 +120,35 @@ pub(super) fn draw(
         .set_color(Color::from_rgb(0xA6, 0xAF, 0xAD));
     canvas.draw_rect(paper, &paint);
     canvas.restore();
+}
+
+fn draw_stroke(canvas: &Canvas, stroke: &StrokeRecord) {
+    let mut builder = skia_safe::PathBuilder::new();
+    let point = |p: Point| skia_safe::Point::new(p.x as f32, p.y as f32);
+    for command in &stroke.outline {
+        match *command {
+            PathCommand::MoveTo(p) => {
+                builder.move_to(point(p));
+            }
+            PathCommand::LineTo(p) => {
+                builder.line_to(point(p));
+            }
+            PathCommand::CubicTo {
+                control1,
+                control2,
+                to,
+            } => {
+                builder.cubic_to(point(control1), point(control2), point(to));
+            }
+            PathCommand::Close => {
+                builder.close();
+            }
+        }
+    }
+    let mut paint = Paint::default();
+    let [r, g, b] = stroke.style.color_rgb;
+    paint
+        .set_anti_alias(true)
+        .set_color(Color::from_rgb(r, g, b));
+    canvas.draw_path(&builder.detach(), &paint);
 }

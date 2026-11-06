@@ -25,7 +25,7 @@
 | 实时画布             | `skia-safe 0.157.0`，Ganesh OpenGL 后端  |
 | 原生笔输入           | 本地 `tablet-input-windows`              |
 | 可选笔迹建模         | `ink-stroke-modeler-rs 0.1.0`            |
-| PDF 渲染和批注保存   | `mupdf 0.8.0`＋内置 MuPDF 1.27.2；保存待实现 |
+| PDF 渲染和批注保存   | `mupdf 0.8.0`＋内置 MuPDF 1.27.2；模拟笔迹测试导出已接入，正式保存待实现 |
 
 这些版本来自当前发布文档；egui 与 Skia 均有 glutin 接入示例，可作为集成起点。**共用上下文的代码已接入并通过编译，用户已确认空白窗口和 egui 文字显示正常；完整交互与绘制兼容性仍需继续验收。** [egui_glow](https://docs.rs/crate/egui_glow/0.37.0)、[skia-safe](https://docs.rs/crate/skia-safe/0.157.0)、[Skia OpenGL 示例](https://github.com/rust-skia/rust-skia/blob/master/skia-safe/examples/gl-window/main.rs)
 
@@ -170,9 +170,9 @@ PDF 页面按 512×512 像素分块，边缘增加 2 像素重叠；缩放时先
 | 标准外观     | `/AP /N` 中的变宽填充路径                         | 显示压感粗细                 |
 | 应用编辑数据 | PDF 内嵌的版本化数据附件                          | 保留原始采样、参数和最终几何 |
 
-后续先通过 MuPDF 的 PDF 批注接口写入 Ink 中心线和基础属性，再验证自定义外观流；必须回读确认不会被引擎自动生成的外观覆盖。这些写入接口尚未接入，因此仍是第一阶段的关键验证关卡。[MuPDF Rust 批注接口](https://docs.rs/mupdf/0.8.0/mupdf/pdf/struct.PdfAnnotation.html)
+步骤 3 已通过 MuPDF 的 PDF 批注接口写入 Ink 中心线和基础属性，并用安全对象及流接口安装自定义外观。保存、回读、再次更新和重新序列化的结构测试确认外观未被引擎自动生成的外观覆盖；实际跨阅读器显示仍按人工验收表记录。[MuPDF Rust 批注接口](https://docs.rs/mupdf/0.8.0/mupdf/pdf/struct.PdfAnnotation.html)
 
-应用数据计划采用 `CBOR＋Zstd`，作为带文档 UUID 的命名附件保存在 PDF 内。记录格式版本、笔迹 UUID、页面关联、算法信息、原始点、建模点、轮廓和批注指纹。MuPDF 的 embedded file 接口用于后续验证，当前尚未写入附件。[MuPDF Rust PDF 接口](https://docs.rs/mupdf/0.8.0/mupdf/pdf/struct.PdfDocument.html)
+步骤 3 的应用数据已采用 `CBOR＋Zstd`，作为带文档 UUID 的版本 1 命名附件保存在 PDF 内，包含笔迹 UUID、页面关联、算法信息、原始点、处理后点、轮廓和批注 SHA256 指纹。回读会核对附件、中心线和外观一致性；失配时保留标准 PDF 并忽略编辑记录。正式保存事务仍在步骤 8 实现。[MuPDF Rust PDF 接口](https://docs.rs/mupdf/0.8.0/mupdf/pdf/struct.PdfDocument.html)
 
 重开时以标准 PDF 外观显示已有笔迹。若附件缺失、版本不支持，或标准批注与记录指纹不一致，保留实际 PDF 内容并忽略失配的编辑记录；仍允许添加新笔迹。
 
@@ -255,7 +255,7 @@ PDF 页面按 512×512 像素分块，边缘增加 2 像素重叠；缩放时先
 - 单独记录采样处理、轮廓生成、CPU 绘制、GPU 耗时、纹理上传量和峰值缓存。
 - 软件事件到提交延迟与高速摄影测得的笔尖到显示延迟分开报告。
 
-这些是待验证目标。当前已完成 winit/glutin 窗口与共享 GL 的 Skia/egui 骨架；用户已确认早期空白窗口与 egui 文字显示正常。MuPDF 第一页只读预览已接入，实际显示和交互仍待用户验收。原生笔输入、实笔性能与跨阅读器保存尚未实现或验证，P0 尚未全部完成。
+这些是待验证目标。当前已完成 winit/glutin 窗口与共享 GL 的 Skia/egui 骨架、MuPDF 第一页预览及模拟压感笔迹/附件保存回读。用户已确认早期空白窗口与 egui 文字显示正常，并在 2026-11-06 反馈当前查看结果无问题。该反馈未细分阅读器和打印项目；跨阅读器、各 DPI 和前序完整交互仍需逐项记录。原生笔输入、实笔性能和正式保存尚未实现，P0 尚未宣告全部通过。
 
 MuPDF 由锁定的 `mupdf-sys 0.8.0` 源码编译并链接，不单独分发 MuPDF DLL；原生依赖与 Skia 预编译包使用一致的 release CRT。发行包仍需补齐完整的依赖声明、许可证和源码提供安排。Skia 优先使用匹配的 MSVC 预编译缓存。首轮依赖准备后验证离线构建，运行验收在断网条件下覆盖。[Skia 构建供应](https://github.com/rust-skia/rust-skia#platform-support-build-targets-and-prebuilt-binaries)、[MuPDF Rust 绑定](https://github.com/messense/mupdf-rs)、[依赖声明](THIRD_PARTY_NOTICES.md)
 
@@ -272,7 +272,7 @@ MuPDF 由锁定的 `mupdf-sys 0.8.0` 源码编译并链接，不单独分发 MuP
 | 已完成 | 0. 窗口与共享 GL 骨架 | 空白窗口、Skia 背景、egui 文字 | P0 的一部分 |
 | 已完成 | 1. 画布区域与坐标基础 | 能缩放、平移和裁剪的测试纸面及坐标数学测试 | P0 / P1 基础 |
 | 已完成 | 2. MuPDF 加载与单页显示 | 后台打开真实 PDF 并将第一页预览交给 Skia | P0 |
-| 待实现 | 3. PDF 保存关键接口验证 | 一条模拟压感笔迹和附件可保存、回读、跨阅读器显示 | P0 关键关卡 |
+| 已实现，人工项目待逐项记录 | 3. PDF 保存关键接口验证 | 一条模拟压感笔迹和附件已可保存、回读；用户反馈当前查看无问题 | P0 关键关卡 |
 | 待实现 | 4. 多页阅读与视图交互 | 连续纵向页面、页码、滚动、定位与缩放 | P1 基础 |
 | 待实现 | 5. 原生笔与 Direct 书写 | 在真实 PDF 页面上直接压感书写 | P1 |
 | 待实现 | 6. 可选笔迹建模 | 默认平滑、运行时关闭、构建时排除 | P1 |
@@ -353,6 +353,10 @@ MuPDF 由锁定的 `mupdf-sys 0.8.0` 源码编译并链接，不单独分发 MuP
 **主要模块**：`document`、`ink`、`pdf`、`render`。
 
 **通过条件**：保存和回读结果一致；外部阅读器能显示变宽笔迹；附件能解码并关联对应批注。记录测试样本和阅读器结果。结合步骤 0、2 的构建与启动证据后再核对 P0 是否满足，不能以“保存 API 返回成功”作为 P0 通过依据。
+
+**当前已实现（2026-11-06）**：最小笔迹数据类型和 Direct 模拟样本（97 个原始/处理后采样），稳定笔迹 UUID、样式和处理快照、可序列化轮廓；Skia 和 PDF 使用同一份变宽填充轮廓。MuPDF worker 从不可变源字节创建副本，写入 `/Ink`、`InkList`、`Rect`、`NM`、打印标志及自定义 `/AP /N`，嵌入带文档 UUID 和指纹的版本 1 CBOR＋Zstd 附件。测试导出写到项目 `.scratch/pdf-save-probe/<UUID>/pressure.pdf`，同步后回读。工具栏 `Pressure demo`、`Export test PDF` 用于预览、导出和自动重新打开；CLI `--pdf-save-probe [源文件]`、`--pdf-inspect 文件` 提供无窗口样本生成和结构核验。
+
+**验证与验收**：无窗口测试覆盖所有页面旋转、偏移 CropBox、UserUnit、原有内容和附件名称树保留、重复导出、重开再更新时 AP 保留、附件损坏和外部修改失配、加密/签名拒绝，以及 worker 生命周期。2026-11-06 用户反馈“我看过了 没问题”；Edge、Acrobat、打印和外部保存附件保留的具体结果仍待按 [PDF 保存验收](docs/pdf-save-validation.zh-CN.md) 逐项记录。此阶段不包含原生笔、Ctrl+S、原子替换及未保存提示。
 
 ### 4. 多页阅读与视图交互
 
@@ -470,4 +474,4 @@ MuPDF 由锁定的 `mupdf-sys 0.8.0` 源码编译并链接，不单独分发 MuP
 
 首版闭环完成后，再依次安排对象橡皮擦与套索、荧光笔和文本高亮、图片与文字、页面工具，最后单独设计图层或无限画布。每项扩展先确认文档模型、标准 PDF 表达、撤销和恢复语义，再实现交互与渲染。
 
-**当前下一步：用户手动验收画布和步骤 2“MuPDF 加载与单页显示”。** 随后优先验证 MuPDF 的批注外观与附件保存，再继续完整的阅读和书写交互。
+**当前下一步：步骤 4“多页阅读与视图交互”。** 步骤 3 已实现保存接口与回读，用户反馈当前查看无问题；跨阅读器、打印及前序完整窗口/DPI 项目继续按验收表补齐记录。

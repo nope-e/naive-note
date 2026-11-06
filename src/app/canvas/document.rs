@@ -7,7 +7,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     app::UserEvent,
-    document::PageGeometry,
+    document::{PageGeometry, StrokeRecord},
     pdf::{LoadedPdf, OpenResponse, PdfResponse, PdfWorker},
     render::CanvasScene,
 };
@@ -17,6 +17,7 @@ use super::pdf_preview::PdfPreview;
 struct OpenDocument {
     pdf: LoadedPdf,
     preview: PdfPreview,
+    demo_stroke: Option<Arc<StrokeRecord>>,
 }
 
 pub(super) struct CanvasDocument {
@@ -24,6 +25,8 @@ pub(super) struct CanvasDocument {
     loaded: Option<OpenDocument>,
     pending: Option<u64>,
     message: Option<String>,
+    pending_export: Option<(u64, u64)>,
+    loaded_request: Option<u64>,
 }
 
 impl CanvasDocument {
@@ -36,10 +39,13 @@ impl CanvasDocument {
             loaded: None,
             pending: None,
             message: None,
+            pending_export: None,
+            loaded_request: None,
         })
     }
 
     pub fn open(&mut self, path: PathBuf) {
+        self.pending_export = None;
         if let Some(loaded) = self.loaded.as_mut() {
             loaded.preview.cancel(&self.worker);
         }
@@ -67,6 +73,19 @@ impl CanvasDocument {
                 }
                 None
             }
+            PdfResponse::Exported(response) => {
+                if self.pending_export != Some((response.document, response.request))
+                    || self.loaded_request != Some(response.document)
+                {
+                    return None;
+                }
+                self.pending_export = None;
+                match response.result {
+                    Ok(path) => self.open(path),
+                    Err(error) => self.message = Some(format!("Test export failed: {error}")),
+                }
+                None
+            }
         }
     }
 
@@ -79,13 +98,16 @@ impl CanvasDocument {
             Ok(pdf) => {
                 let page = pdf.first_page.geometry;
                 self.message = Some(format!(
-                    "{} | Read-only first-page preview",
-                    pdf.path.display()
+                    "{} | {} | First-page preview",
+                    pdf.path.display(),
+                    pdf.edit_data_status,
                 ));
                 self.loaded = Some(OpenDocument {
                     pdf,
                     preview: PdfPreview::new(response.request),
+                    demo_stroke: None,
                 });
+                self.loaded_request = Some(response.request);
                 Some(page)
             }
             Err(error) => {
@@ -100,6 +122,58 @@ impl CanvasDocument {
         self.pending = None;
         self.loaded = None;
         self.message = None;
+        self.pending_export = None;
+        self.loaded_request = None;
+    }
+
+    pub fn can_demo(&self) -> bool {
+        self.loaded.is_some() && self.pending.is_none() && self.pending_export.is_none()
+    }
+
+    pub fn can_export_demo(&self) -> bool {
+        self.can_demo()
+            && self
+                .loaded
+                .as_ref()
+                .is_some_and(|loaded| loaded.demo_stroke.is_some())
+    }
+
+    pub fn toggle_demo(&mut self) {
+        if !self.can_demo() {
+            return;
+        }
+        let loaded = self.loaded.as_mut().expect("loaded document");
+        if loaded.demo_stroke.take().is_none() {
+            match crate::ink::demo_stroke(loaded.pdf.first_page.geometry) {
+                Ok(stroke) => {
+                    loaded.demo_stroke = Some(Arc::new(stroke));
+                    self.message = Some(
+                        "Simulated pressure stroke | Export test PDF to save a separate copy"
+                            .to_owned(),
+                    );
+                }
+                Err(error) => self.message = Some(format!("{error:#}")),
+            }
+        } else {
+            self.message = Some("Demo overlay removed".to_owned());
+        }
+    }
+
+    pub fn export_demo(&mut self) {
+        if !self.can_export_demo() {
+            return;
+        }
+        let stroke = Arc::clone(self.loaded.as_ref().unwrap().demo_stroke.as_ref().unwrap());
+        let document = self.loaded_request.unwrap();
+        match self.worker.export_probe(document, stroke) {
+            Ok(request) => {
+                self.pending_export = Some((document, request));
+                self.message = Some(
+                    "Saving and verifying a test copy in .scratch/pdf-save-probe/...".to_owned(),
+                );
+            }
+            Err(error) => self.message = Some(format!("{error:#}")),
+        }
     }
 
     pub fn can_close(&self) -> bool {
@@ -120,6 +194,7 @@ impl CanvasDocument {
     pub fn update_scene(&mut self, context: &egui::Context, scene: &mut CanvasScene) {
         if let Some(loaded) = self.loaded.as_mut() {
             scene.bitmap = Some(Arc::clone(&loaded.pdf.first_page));
+            scene.demo_stroke = loaded.demo_stroke.clone();
             scene.tiles =
                 loaded
                     .preview
