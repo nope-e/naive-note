@@ -2,6 +2,7 @@
 
 mod canvas;
 mod frame_rate;
+mod frame_scheduler;
 
 use std::{path::PathBuf, time::Instant};
 
@@ -26,7 +27,6 @@ pub fn run() -> Result<()> {
     let mut app = Application {
         runtime: None,
         proxy: event_loop.create_proxy(),
-        repaint_at: None,
         error: None,
         show_renderer_info: false,
     };
@@ -42,7 +42,6 @@ pub fn run() -> Result<()> {
 struct Application {
     runtime: Option<Runtime>,
     proxy: EventLoopProxy<UserEvent>,
-    repaint_at: Option<Instant>,
     error: Option<anyhow::Error>,
     show_renderer_info: bool,
 }
@@ -54,6 +53,7 @@ struct Runtime {
     occluded: bool,
     canvas: canvas::CanvasWorkspace,
     frame_rate: frame_rate::FrameRate,
+    frames: frame_scheduler::FrameScheduler,
 }
 
 impl Runtime {
@@ -70,6 +70,7 @@ impl Runtime {
             occluded: false,
             canvas,
             frame_rate: frame_rate::FrameRate::default(),
+            frames: frame_scheduler::FrameScheduler::default(),
         })
     }
 
@@ -82,13 +83,13 @@ impl Runtime {
     }
 
     fn draw(&mut self, show_renderer_info: bool) -> Result<()> {
+        if !self.frames.begin_frame(Instant::now()) {
+            return Ok(());
+        }
         // egui may repeat layout with consumed input. Keep the updated state,
         // but process input only on the first pass of this frame.
         let mut process_input = true;
         let size = self.window.window.inner_size();
-        if show_renderer_info {
-            self.frame_rate.begin_frame();
-        }
         let fps = self.frame_rate.fps();
         self.renderer.draw(&self.window, |ui| {
             let scene = self.canvas.show(
@@ -103,7 +104,7 @@ impl Runtime {
         })?;
         if show_renderer_info {
             self.frame_rate.frame_presented();
-            self.window.window.request_redraw();
+            self.request_repaint();
         }
         // Open the native dialog once, after egui's possibly repeated layout.
         if self.canvas.take_open_request() {
@@ -116,9 +117,13 @@ impl Runtime {
                 self.canvas.open_pdf(path);
             }
             self.frame_rate.reset();
-            self.window.window.request_redraw();
+            self.request_repaint();
         }
         Ok(())
+    }
+
+    fn request_repaint(&mut self) {
+        self.frames.request_repaint(Instant::now());
     }
 }
 
@@ -132,8 +137,8 @@ impl Application {
 
 impl ApplicationHandler<UserEvent> for Application {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(runtime) = &self.runtime {
-            runtime.window.window.request_redraw();
+        if let Some(runtime) = &mut self.runtime {
+            runtime.request_repaint();
             return;
         }
         match Runtime::new(event_loop, self.proxy.clone()) {
@@ -147,7 +152,7 @@ impl ApplicationHandler<UserEvent> for Application {
                 }
                 runtime.window.window.set_visible(true);
                 log::info!("first frame presented; window shown");
-                runtime.window.window.request_redraw();
+                runtime.request_repaint();
                 self.runtime = Some(runtime);
             }
             Err(error) => self.fail(event_loop, error),
@@ -168,23 +173,25 @@ impl ApplicationHandler<UserEvent> for Application {
 
         let repaint = runtime
             .renderer
-            .on_window_event(&runtime.window.window, &event);
+            .on_window_event(&runtime.window.window, &event)
+            // egui marks redraws and moves as repaint-worthy. Re-arming a redraw
+            // here would create a perpetual WM_PAINT loop, even without F12.
+            // Moving only changes desktop position; DPI/size have their own events.
+            && !matches!(event, WindowEvent::RedrawRequested | WindowEvent::Moved(_));
         match event {
             WindowEvent::DroppedFile(path) => {
                 runtime.canvas.open_pdf(path);
-                runtime.window.window.request_redraw();
+                runtime.request_repaint();
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
-                if let Err(error) = runtime.renderer.resize(&runtime.window) {
-                    self.fail(event_loop, error);
-                    return;
-                }
-                runtime.window.window.request_redraw();
+                // Coalesce size changes. GPU surfaces are resized to the latest
+                // physical size only when a frame is actually drawn.
+                runtime.request_repaint();
             }
             WindowEvent::Occluded(occluded) => {
                 runtime.occluded = occluded;
                 if !occluded {
-                    runtime.window.window.request_redraw();
+                    runtime.request_repaint();
                 }
             }
             WindowEvent::KeyboardInput { event, .. }
@@ -194,7 +201,7 @@ impl ApplicationHandler<UserEvent> for Application {
             {
                 self.show_renderer_info = !self.show_renderer_info;
                 runtime.frame_rate.reset();
-                runtime.window.window.request_redraw();
+                runtime.request_repaint();
             }
             WindowEvent::RedrawRequested if runtime.can_draw() => {
                 if let Err(error) = runtime.draw(self.show_renderer_info) {
@@ -205,19 +212,21 @@ impl ApplicationHandler<UserEvent> for Application {
             _ => {}
         }
         if repaint && runtime.can_draw() {
-            runtime.window.window.request_redraw();
+            runtime.request_repaint();
         }
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Repaint(at) => {
-                self.repaint_at = Some(self.repaint_at.map_or(at, |pending| pending.min(at)));
+                if let Some(runtime) = self.runtime.as_mut() {
+                    runtime.frames.request_repaint(at);
+                }
             }
             UserEvent::PdfOpened(response) => {
                 if let Some(runtime) = self.runtime.as_mut() {
                     runtime.canvas.pdf_opened(*response);
-                    runtime.window.window.request_redraw();
+                    runtime.request_repaint();
                 }
             }
         }
@@ -230,12 +239,13 @@ impl ApplicationHandler<UserEvent> for Application {
         };
         if !runtime.can_draw() {
             runtime.frame_rate.reset();
-            self.repaint_at = None;
+            runtime.frames.cancel_repaint();
             return;
         }
-        if let Some(at) = self.repaint_at {
+        if let Some(at) = runtime.frames.next_repaint() {
             if at <= Instant::now() {
-                self.repaint_at = None;
+                // Request only from the outer loop, never chain WM_PAINT from
+                // inside draw: Windows uses the UI thread for native move/resize.
                 runtime.window.window.request_redraw();
             } else {
                 event_loop.set_control_flow(ControlFlow::WaitUntil(at));
@@ -245,7 +255,6 @@ impl ApplicationHandler<UserEvent> for Application {
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
         self.runtime = None;
-        self.repaint_at = None;
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {

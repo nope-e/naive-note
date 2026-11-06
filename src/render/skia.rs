@@ -76,7 +76,7 @@ impl SkiaRenderer {
             )
             .context("wrap window framebuffer in a Skia surface")?,
         );
-        log::info!(
+        log::debug!(
             "Skia window surface created: {} x {}",
             size.width,
             size.height

@@ -9,7 +9,7 @@ use std::{sync::Arc, time::Instant};
 
 use anyhow::{Result, anyhow};
 use egui_glow::glow::{self, HasContext};
-use winit::{event::WindowEvent, event_loop::EventLoopProxy, window::Window};
+use winit::{dpi::PhysicalSize, event::WindowEvent, event_loop::EventLoopProxy, window::Window};
 
 use crate::{
     app::UserEvent,
@@ -29,22 +29,32 @@ pub struct CanvasScene {
 pub struct Renderer {
     ui: EguiRenderer,
     skia: skia::SkiaRenderer,
+    size: PhysicalSize<u32>,
 }
 
 impl Renderer {
     pub fn new(window: &GlWindow, proxy: EventLoopProxy<UserEvent>) -> Result<Self> {
         let skia = skia::SkiaRenderer::new(window)?;
         let ui = EguiRenderer::new(window, proxy)?;
-        Ok(Self { ui, skia })
+        Ok(Self {
+            ui,
+            skia,
+            size: window.window.inner_size(),
+        })
     }
 
     pub fn on_window_event(&mut self, window: &Window, event: &WindowEvent) -> bool {
         self.ui.state.on_window_event(window, event).repaint
     }
 
-    pub fn resize(&mut self, window: &GlWindow) -> Result<()> {
-        window.resize(window.window.inner_size());
-        self.skia.resize(window.window.inner_size())
+    fn resize(&mut self, window: &GlWindow) -> Result<()> {
+        let size = window.window.inner_size();
+        if size != self.size {
+            window.resize(size);
+            self.skia.resize(size)?;
+            self.size = size;
+        }
+        Ok(())
     }
 
     pub fn draw(
@@ -52,6 +62,7 @@ impl Renderer {
         window: &GlWindow,
         mut build_ui: impl FnMut(&mut egui::Ui) -> Option<CanvasScene>,
     ) -> Result<()> {
+        self.resize(window)?;
         let input = self.ui.state.take_egui_input(&window.window);
         let mut scene = None;
         let mut output = self.ui.context.run_ui(input, |ui| scene = build_ui(ui));

@@ -1,6 +1,9 @@
 //! Toolbar widgets produce view actions; the workspace applies them.
 
-use crate::document::{CanvasViewport, PageGeometry, Point};
+use crate::{
+    app::frame_scheduler::MAX_FPS,
+    document::{CanvasViewport, PageGeometry, Point},
+};
 
 pub(super) enum ViewAction {
     Open,
@@ -87,7 +90,7 @@ fn renderer_info(
     let crop = page.crop_box();
     let fps = fps.map_or_else(|| "--".to_owned(), |fps| format!("{fps:.1}"));
     ui.label(format!(
-        "Skia + egui | GL | FPS: {fps} | CropBox [{:.0}, {:.0}, {:.0}, {:.0}] | UserUnit {} | Rotation {} deg | F12: hide",
+        "Skia + egui | GL | FPS: {fps} / {MAX_FPS} max | CropBox [{:.0}, {:.0}, {:.0}, {:.0}] | UserUnit {} | Rotation {} deg | F12: hide",
         crop.min.x, crop.min.y, crop.max.x, crop.max.y,
         page.user_unit(), page.rotation().degrees(),
     ));

@@ -10,16 +10,15 @@ pub(super) struct FrameRate {
 }
 
 impl FrameRate {
-    pub fn begin_frame(&mut self) {
-        self.started_at.get_or_insert_with(Instant::now);
-    }
-
     pub fn frame_presented(&mut self) {
+        let now = Instant::now();
         let Some(started_at) = self.started_at else {
+            // The first presentation anchors the sample; count only subsequent
+            // intervals so the first result does not include an extra frame.
+            self.started_at = Some(now);
             return;
         };
         self.frames += 1;
-        let now = Instant::now();
         let elapsed = now.duration_since(started_at);
         if elapsed >= Duration::from_millis(500) {
             self.fps = Some(f64::from(self.frames) / elapsed.as_secs_f64());
