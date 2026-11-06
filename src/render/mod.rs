@@ -14,7 +14,7 @@ use winit::{dpi::PhysicalSize, event::WindowEvent, event_loop::EventLoopProxy, w
 use crate::{
     app::UserEvent,
     document::{CanvasViewport, PageGeometry, ViewTransform},
-    pdf::PageBitmap,
+    pdf::{PageBitmap, PageTile},
     platform::GlWindow,
 };
 
@@ -24,6 +24,7 @@ pub struct CanvasScene {
     pub page: PageGeometry,
     pub view: ViewTransform,
     pub bitmap: Option<Arc<PageBitmap>>,
+    pub tiles: Vec<Arc<PageTile>>,
 }
 
 pub struct Renderer {

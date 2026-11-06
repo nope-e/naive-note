@@ -10,10 +10,18 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use super::{OpenResponse, backend::PdfSession};
+use super::{OpenResponse, PdfResponse, TileKey, TileResponse, backend::PdfSession};
 
 enum Command {
-    Open { request: u64, path: PathBuf },
+    Open {
+        request: u64,
+        path: PathBuf,
+    },
+    Render {
+        document: u64,
+        request: u64,
+        keys: Vec<TileKey>,
+    },
     Close,
     Shutdown,
 }
@@ -24,27 +32,22 @@ static NEXT_REQUEST: AtomicU64 = AtomicU64::new(0);
 pub struct PdfWorker {
     sender: Sender<Command>,
     latest: Arc<AtomicU64>,
+    latest_render: Arc<AtomicU64>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl PdfWorker {
-    pub fn new(deliver: impl Fn(OpenResponse) + Send + 'static) -> Result<Self> {
+    pub fn new(deliver: impl Fn(PdfResponse) + Send + 'static) -> Result<Self> {
         let (sender, receiver) = mpsc::channel();
         let latest = Arc::new(AtomicU64::new(0));
         let worker_latest = Arc::clone(&latest);
+        let latest_render = Arc::new(AtomicU64::new(0));
+        let worker_render = Arc::clone(&latest_render);
         let thread = thread::Builder::new()
             .name("mupdf".to_owned())
             .spawn(move || {
                 let mut session = None;
-                while let Ok(mut command) = receiver.recv() {
-                    // Opening another document supersedes queued work. Pixel buffers
-                    // are produced only for the newest request, not every UI action.
-                    while let Ok(newer) = receiver.try_recv() {
-                        if matches!(command, Command::Close) {
-                            session.take();
-                        }
-                        command = newer;
-                    }
+                while let Ok(command) = receiver.recv() {
                     match command {
                         Command::Open { request, path } => {
                             if request != worker_latest.load(Ordering::Acquire) {
@@ -62,7 +65,7 @@ impl PdfWorker {
                             }
                             let result = match result {
                                 Ok(Some((opened, preview))) => {
-                                    session.replace(opened);
+                                    session.replace((request, opened));
                                     Ok(preview)
                                 }
                                 Ok(None) => continue,
@@ -71,7 +74,44 @@ impl PdfWorker {
                                     Err(format!("{error:#}"))
                                 }
                             };
-                            deliver(OpenResponse { request, result });
+                            deliver(PdfResponse::Opened(OpenResponse { request, result }));
+                        }
+                        Command::Render {
+                            document,
+                            request,
+                            keys,
+                        } => {
+                            if request != worker_render.load(Ordering::Acquire) {
+                                continue;
+                            }
+                            let Some((id, opened)) = session.as_ref() else {
+                                continue;
+                            };
+                            if *id != document {
+                                continue;
+                            }
+                            let mut tiles = Vec::with_capacity(keys.len());
+                            let mut error = None;
+                            for key in keys {
+                                if request != worker_render.load(Ordering::Acquire) {
+                                    break;
+                                }
+                                match opened.render_tile(key) {
+                                    Ok(tile) => tiles.push(Arc::new(tile)),
+                                    Err(cause) => {
+                                        log::warn!("MuPDF tile render failed: {cause:#}");
+                                        error = Some(format!("{cause:#}"));
+                                        break;
+                                    }
+                                }
+                            }
+                            if request == worker_render.load(Ordering::Acquire) {
+                                deliver(PdfResponse::Tiles(TileResponse {
+                                    document,
+                                    request,
+                                    result: error.map_or_else(|| Ok(tiles), Err),
+                                }));
+                            }
                         }
                         Command::Close => {
                             session.take();
@@ -86,11 +126,13 @@ impl PdfWorker {
         Ok(Self {
             sender,
             latest,
+            latest_render,
             thread: Some(thread),
         })
     }
 
     pub fn open(&self, path: PathBuf) -> Result<u64> {
+        self.cancel_render();
         let request = self.invalidate();
         self.sender
             .send(Command::Open { request, path })
@@ -99,8 +141,27 @@ impl PdfWorker {
     }
 
     pub fn close(&self) {
+        self.cancel_render();
         self.invalidate();
         let _ = self.sender.send(Command::Close);
+    }
+
+    pub fn render(&self, document: u64, keys: Vec<TileKey>) -> Result<u64> {
+        let request = self.cancel_render();
+        self.sender
+            .send(Command::Render {
+                document,
+                request,
+                keys,
+            })
+            .context("MuPDF worker stopped")?;
+        Ok(request)
+    }
+
+    pub fn cancel_render(&self) -> u64 {
+        let request = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed) + 1;
+        self.latest_render.store(request, Ordering::Release);
+        request
     }
 
     fn invalidate(&self) -> u64 {
@@ -112,6 +173,7 @@ impl PdfWorker {
 
 impl Drop for PdfWorker {
     fn drop(&mut self) {
+        self.cancel_render();
         self.invalidate();
         let _ = self.sender.send(Command::Shutdown);
         if let Some(thread) = self.thread.take()
@@ -132,7 +194,9 @@ mod tests {
         let (responses, received) = mpsc::channel();
         let (release, wait) = mpsc::channel();
         let worker = PdfWorker::new(move |response| {
-            let _ = responses.send(response);
+            if let PdfResponse::Opened(response) = response {
+                let _ = responses.send(response);
+            }
             // Hold the worker at a known boundary while the test queues actions.
             let _ = wait.recv_timeout(Duration::from_secs(5));
         })

@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use glutin::config::GlConfig;
@@ -9,7 +12,10 @@ use skia_safe::{
 };
 use winit::dpi::PhysicalSize;
 
-use crate::{pdf::PageBitmap, platform::GlWindow};
+use crate::{
+    pdf::{PageBitmap, PageTile, TileKey},
+    platform::GlWindow,
+};
 
 use super::{CanvasScene, page};
 
@@ -17,6 +23,7 @@ pub(super) struct SkiaRenderer {
     // The wrapped framebuffer must be released before its DirectContext.
     surface: Option<Surface>,
     page_image: Option<(Arc<PageBitmap>, Image)>,
+    tile_images: HashMap<TileKey, (Arc<PageTile>, Image)>,
     context: DirectContext,
     size: PhysicalSize<u32>,
     samples: usize,
@@ -28,11 +35,13 @@ impl SkiaRenderer {
         let interface =
             gpu::gl::Interface::new_load_with_cstr(|name| window.get_proc_address(name))
                 .context("load Skia OpenGL interface")?;
-        let context = gpu::direct_contexts::make_gl(interface, None)
+        let mut context = gpu::direct_contexts::make_gl(interface, None)
             .context("create Skia Ganesh OpenGL context")?;
+        context.set_resource_cache_limit(128 * 1024 * 1024);
         let mut renderer = Self {
             surface: None,
             page_image: None,
+            tile_images: HashMap::new(),
             context,
             size: PhysicalSize::new(0, 0),
             samples: usize::from(window.config.num_samples()),
@@ -92,22 +101,27 @@ impl SkiaRenderer {
                 .as_ref()
                 .is_some_and(|(cached, _)| Arc::ptr_eq(cached, bitmap))
             {
-                let info = ImageInfo::new(
-                    (i32::try_from(bitmap.width)?, i32::try_from(bitmap.height)?),
-                    ColorType::RGBA8888,
-                    AlphaType::Opaque,
-                    None,
-                );
-                let image = images::raster_from_data(
-                    &info,
-                    Data::new_copy(&bitmap.rgba),
-                    bitmap.width as usize * 4,
-                )
-                .context("Create Skia PDF page image")?;
+                let image = page_image(bitmap)?;
                 self.page_image = Some((Arc::clone(bitmap), image));
             }
         } else {
             self.page_image = None;
+        }
+        // Retain only visible images. CPU pixels are shared with the LRU rather
+        // than copied again into Skia; its GPU resource cache has a separate cap.
+        let tiles = scene.map_or(&[][..], |scene| scene.tiles.as_slice());
+        self.tile_images.retain(|key, (cached, _)| {
+            tiles
+                .iter()
+                .any(|tile| tile.key == *key && Arc::ptr_eq(tile, cached))
+        });
+        let mut tile_images = Vec::with_capacity(tiles.len());
+        for tile in tiles {
+            if let Entry::Vacant(entry) = self.tile_images.entry(tile.key) {
+                let image = page_image(&tile.bitmap)?;
+                entry.insert((Arc::clone(tile), image));
+            }
+            tile_images.push(self.tile_images[&tile.key].1.clone());
         }
         let Some(surface) = self.surface.as_mut() else {
             return Ok(());
@@ -121,6 +135,7 @@ impl SkiaRenderer {
                 canvas,
                 scene,
                 self.page_image.as_ref().map(|(_, image)| image),
+                &tile_images,
             );
         }
 
@@ -136,8 +151,24 @@ impl Drop for SkiaRenderer {
     fn drop(&mut self) {
         self.surface = None;
         self.page_image = None;
+        self.tile_images.clear();
         // Release while the GL context is still current, including on initialization errors.
         // This also follows rust-skia's recommended shutdown for AMD drivers.
         self.context.release_resources_and_abandon();
     }
+}
+
+fn page_image(bitmap: &PageBitmap) -> Result<Image> {
+    let info = ImageInfo::new(
+        (i32::try_from(bitmap.width)?, i32::try_from(bitmap.height)?),
+        ColorType::RGBA8888,
+        AlphaType::Opaque,
+        None,
+    );
+    images::raster_from_data(
+        &info,
+        Data::new_with_owner(Arc::clone(&bitmap.rgba)),
+        bitmap.width as usize * 4,
+    )
+    .context("Create Skia PDF page image")
 }

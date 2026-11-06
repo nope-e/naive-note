@@ -7,7 +7,12 @@ use skia_safe::{
 use super::{CanvasScene, test_page};
 use crate::document::Point;
 
-pub(super) fn draw(canvas: &Canvas, scene: &CanvasScene, image: Option<&Image>) {
+pub(super) fn draw(
+    canvas: &Canvas,
+    scene: &CanvasScene,
+    image: Option<&Image>,
+    tile_images: &[Image],
+) {
     let viewport = scene.viewport;
     let top_left = viewport.logical_to_physical(viewport.logical.min);
     let bottom_right = viewport.logical_to_physical(viewport.logical.max);
@@ -72,6 +77,35 @@ pub(super) fn draw(canvas: &Canvas, scene: &CanvasScene, image: Option<&Image>) 
             SamplingOptions::from(FilterMode::Linear),
             &Paint::default(),
         );
+        for (tile, image) in scene.tiles.iter().zip(tile_images) {
+            let core = tile.key.core();
+            let bounds = tile.bitmap.bounds;
+            canvas.save();
+            // Draw only the core, sampling the two-pixel overlap at its edges.
+            canvas.clip_rect(
+                SkRect::new(
+                    core.min.x as f32,
+                    core.min.y as f32,
+                    core.max.x as f32,
+                    core.max.y as f32,
+                ),
+                None,
+                false,
+            );
+            canvas.draw_image_rect_with_sampling_options(
+                image,
+                None,
+                SkRect::new(
+                    bounds.min.x as f32,
+                    bounds.min.y as f32,
+                    bounds.max.x as f32,
+                    bounds.max.y as f32,
+                ),
+                SamplingOptions::from(FilterMode::Linear),
+                &Paint::default(),
+            );
+            canvas.restore();
+        }
     } else {
         test_page::draw_contents(canvas, scene.page);
     }

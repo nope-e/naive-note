@@ -1,6 +1,6 @@
 # Naive Note
 
-Windows 本地 PDF 手写笔记应用。已接入 MuPDF 第一页只读预览：后台读取 PDF 内存快照并渲染，Skia 在现有画布显示，支持缩放、平移和视图旋转。窗口、显示和实际交互待用户手动验收；书写和保存尚未实现。
+Windows 本地 PDF 手写笔记应用。已接入 MuPDF 第一页只读预览：后台读取 PDF 内存快照并渲染，Skia 在现有画布显示，支持缩放、平移、视图旋转及可见区域按需高清重渲。窗口、显示和实际交互待用户手动验收；书写和保存尚未实现。
 
 ## 构建与运行
 
@@ -44,7 +44,9 @@ cargo run --locked -- 'D:\documents\中文示例.pdf'
 
 100% 时，1 纸面 point（1/72 英寸）对应 96/72 Windows 逻辑像素，再乘 DPI 比例得到物理像素。状态栏显示纸面坐标和原始 PDF 用户空间坐标；MuPDF 的实际页面变换用于读取有效 CropBox、旋转和 UserUnit。
 
-当前范围为**第一页只读预览**：单文件上限 256 MiB；位图以最高 144 DPI、最长边不超过 2048 px 渲染，放大暂不补高清。密码保护文档暂不支持。PDF 已有批注随底图显示，尚无翻页、连续多页、手写、批注编辑或保存入口。关闭后旧结果不会重新覆盖页面；正在执行的单次 MuPDF 光栅化尚不能中途抢占，退出会等待 worker 收尾。
+当前范围为**第一页只读预览**：单文件上限 256 MiB；先生成最高 144 DPI、最长边不超过 2048 px 的整页底图。放大后按 `缩放 × 96/72 × 屏幕 DPI 比例` 计算物理像素密度，向上选择相邻倍率约为 √2 的渲染档位，只补渲可见的 512×512 px 分块，每侧增加 2 px 采样重叠。800% 时不再仅拉伸整页底图；原始扫描图片自身的分辨率仍限制细节。
+
+所需分块集合变化后等待 120 ms 再启动后台补图，期间显示底图或当前档位已有分块；平移复用缓存，缩放和 DPI 变化重新计算需求。CPU 分块像素 LRU 与 Skia GPU 资源缓存分别设为 128 MiB，Skia 与 CPU 缓存共享像素而不重复复制；这不是整个进程的内存上限，PDF 快照、MuPDF 显示列表、底图和临时光栅化缓冲另计。单次可见集合最多 96 块，超大可视区会降低档位以适应预算。旧渲染在分块之间取消，结果同时校验文档与请求编号。密码保护文档暂不支持。PDF 已有批注随底图显示，尚无翻页、连续多页、手写、批注编辑或保存入口。正在执行的单次 MuPDF 调用尚不能中途抢占，退出会等待 worker 收尾。
 
 ```powershell
 cargo build --locked --target x86_64-pc-windows-msvc
@@ -70,10 +72,12 @@ MuPDF 仅启用 `base14-fonts + system-fonts`，保留 PDF 支持及 Windows 字
 | `src/app/canvas/toolbar.rs` | 工具栏、快捷键、渲染信息；返回视图操作 |
 | `src/app/canvas/status_bar.rs` | 页面、缩放和指针坐标的只读状态显示 |
 | `src/app/canvas/area.rs` | 中央区域布局、输入归属、拖动和滚轮手势；返回交互结果 |
+| `src/app/canvas/pdf_preview.rs` | 高清补图防抖、请求生命周期及过时结果过滤 |
 | `src/document/` | 页面几何、CropBox / 旋转 / UserUnit、纸面与视图坐标转换 |
 | `src/platform/` | 原生窗口、GL 上下文、窗口 surface、vsync 与交换缓冲 |
 | `src/render/` | egui 输入和绘制、共享 GL 状态切换、Skia 帧缓冲包装与资源释放 |
-| `src/pdf/` | MuPDF worker、内存会话快照、第一页几何读取及有界 RGBA8 预览 |
+| `src/pdf/` | MuPDF worker、内存会话快照、第一页几何、显示列表及 RGBA8 预览/分块 |
+| `src/pdf/tiles.rs` | 可见分块与 DPI 档位计算、128 MiB CPU 像素 LRU |
 
 每帧先计算 egui 布局，明确中央画布的逻辑区域、物理区域和 DPI 比例，再由 Skia 绘制工作区和页面，flush 后叠加 egui，最后交换缓冲。MuPDF 对象始终留在一个后台线程，只传拥有所有权的页面信息和像素；请求编号过滤切换或关闭后的旧结果。Skia 缓存当前页图像，同时裁剪到中央画布和纸张边界；egui 控件负责输入归属。重绘请求统一合并，并通过 `WaitUntil` 等待帧期限，避免在 UI 线程 sleep 或忙等；最小化与零尺寸窗口暂停绘制。收到 `RedrawRequested` 不再自动请求下一帧，普通窗口位置移动也不触发内容重绘，避免 Windows 原生拖窗循环被连续绘制和 vsync 阻塞（对应 [winit #4708](https://github.com/rust-windowing/winit/issues/4708) 的机制）。缩放、DPI 变化和恢复事件重新触发绘制；连续尺寸事件合并到下一帧，只有实际绘制尺寸变化才重新包装窗口帧缓冲为 Skia surface。拖窗流畅度仍待用户实机验收。
 
@@ -81,4 +85,4 @@ MuPDF 仅启用 `base14-fonts + system-fonts`，保留 PDF 支持及 Windows 字
 
 ## 当前验证范围
 
-无窗口测试覆盖坐标数学，以及 MuPDF 的继承页面属性、有效 CropBox、旋转、UserUnit、位图尺寸和行布局、中文路径、文件句柄释放和错误处理。这些检查不判断渲染外观。所有视觉、窗口和实际交互验收按 [AGENTS.md](AGENTS.md) 由用户执行；步骤与预期结果见 [画布手动验收](docs/canvas-validation.zh-CN.md) 和 [MuPDF 手动验收](docs/mupdf-validation.zh-CN.md)。
+无窗口测试覆盖坐标数学，以及 MuPDF 的继承页面属性、有效 CropBox、旋转、UserUnit、位图尺寸和行布局、中文路径、文件句柄释放和错误处理；高清部分覆盖 800% 与 100/150/200% DPI 的可见分块选择、视图旋转、预算降档、LRU 淘汰、分块重叠与尺寸、任务替换及文档切换失效。这些检查不判断渲染外观。所有视觉、窗口和实际交互验收按 [AGENTS.md](AGENTS.md) 由用户执行；步骤与预期结果见 [画布手动验收](docs/canvas-validation.zh-CN.md) 和 [MuPDF 手动验收](docs/mupdf-validation.zh-CN.md)。

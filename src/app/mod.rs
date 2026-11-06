@@ -19,7 +19,7 @@ use crate::{platform::GlWindow, render::Renderer};
 
 pub enum UserEvent {
     Repaint(Instant),
-    PdfOpened(Box<crate::pdf::OpenResponse>),
+    PdfResponse(Box<crate::pdf::PdfResponse>),
 }
 
 pub fn run() -> Result<()> {
@@ -223,9 +223,9 @@ impl ApplicationHandler<UserEvent> for Application {
                     runtime.frames.request_repaint(at);
                 }
             }
-            UserEvent::PdfOpened(response) => {
+            UserEvent::PdfResponse(response) => {
                 if let Some(runtime) = self.runtime.as_mut() {
-                    runtime.canvas.pdf_opened(*response);
+                    runtime.canvas.pdf_response(*response);
                     runtime.request_repaint();
                 }
             }

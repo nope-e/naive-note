@@ -111,6 +111,170 @@ fn preview_has_bounded_dimensions_and_tightly_packed_rgba() {
 }
 
 #[test]
+fn high_resolution_tiles_are_bounded_with_overlap_and_original_page_coordinates() {
+    for rotation in [0, 90, 180, 270] {
+        let session = PdfSession::from_bytes(&pdf_bytes(&format!(
+            "/MediaBox [-20 -30 220 330] /CropBox [20 30 220 330] /Rotate {rotation}"
+        )))
+        .unwrap();
+        for key in [
+            TileKey {
+                level: 9,
+                x: 0,
+                y: 0,
+            },
+            TileKey {
+                level: 9,
+                x: 2,
+                y: 3,
+            },
+        ] {
+            let tile = session.render_tile(key).unwrap();
+            let bitmap = tile.bitmap;
+            assert!(bitmap.width > 0 && bitmap.width <= TILE_EDGE + 2 * TILE_OVERLAP);
+            assert!(bitmap.height > 0 && bitmap.height <= TILE_EDGE + 2 * TILE_OVERLAP);
+            assert_eq!(
+                bitmap.rgba.len(),
+                bitmap.width as usize * bitmap.height as usize * 4
+            );
+            assert!(
+                (bitmap.bounds.size().width * key.scale() - f64::from(bitmap.width)).abs() < 1e-8
+            );
+            assert!(
+                (bitmap.bounds.size().height * key.scale() - f64::from(bitmap.height)).abs() < 1e-8
+            );
+            assert_eq!(bitmap.geometry, session.geometry);
+            let core = key.core();
+            assert!(bitmap.bounds.contains(core.min));
+            assert!(bitmap.bounds.contains(core.max));
+        }
+        // Partial last tile must stop at the page's ceil-rounded pixel boundary.
+        let size = session.geometry.paper_size();
+        let key = TileKey {
+            level: 9,
+            x: (size.width
+                * TileKey {
+                    level: 9,
+                    x: 0,
+                    y: 0,
+                }
+                .scale()
+                / f64::from(TILE_EDGE))
+            .ceil() as u32
+                - 1,
+            y: 0,
+        };
+        let tile = session.render_tile(key).unwrap();
+        assert!(
+            (tile.bitmap.bounds.max.x * key.scale() - (size.width * key.scale()).ceil()).abs()
+                < 1e-8
+        );
+        assert!(
+            session
+                .render_tile(TileKey {
+                    level: 9,
+                    x: 1000,
+                    y: 1000
+                })
+                .is_err()
+        );
+        assert!(
+            session
+                .render_tile(TileKey {
+                    level: 100,
+                    x: 0,
+                    y: 0
+                })
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn worker_refinement_is_superseded_and_preserves_session_after_failed_open() {
+    use crate::pdf::{PdfResponse, PdfWorker};
+    use std::{sync::mpsc, time::Duration};
+
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".scratch")
+        .join(format!("mupdf-refine-test-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("preview.pdf");
+    std::fs::write(&path, pdf_bytes("/MediaBox [0 0 200 300]")).unwrap();
+    let (responses, received) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let worker = PdfWorker::new(move |response| {
+        responses.send(response).unwrap();
+        let _ = wait.recv_timeout(Duration::from_secs(5));
+    })
+    .unwrap();
+    let document = worker.open(path.clone()).unwrap();
+    assert!(
+        matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        PdfResponse::Opened(response) if response.request == document && response.result.is_ok())
+    );
+    let key = TileKey {
+        level: 8,
+        x: 0,
+        y: 0,
+    };
+    worker.render(document, vec![key]).unwrap();
+    let newest = worker
+        .render(document, vec![TileKey { x: 1, ..key }])
+        .unwrap();
+    release.send(()).unwrap();
+    match received.recv_timeout(Duration::from_secs(5)).unwrap() {
+        PdfResponse::Tiles(response) => {
+            assert_eq!(response.request, newest);
+            assert_eq!(response.document, document);
+            assert_eq!(response.result.unwrap()[0].key.x, 1);
+        }
+        _ => panic!("expected the latest tile job"),
+    }
+    let failed = worker.open(directory.join("missing.pdf")).unwrap();
+    release.send(()).unwrap();
+    assert!(
+        matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        PdfResponse::Opened(response) if response.request == failed && response.result.is_err())
+    );
+    let resumed = worker.render(document, vec![key]).unwrap();
+    release.send(()).unwrap();
+    assert!(
+        matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        PdfResponse::Tiles(response) if response.document == document && response.request == resumed
+            && response.result.is_ok())
+    );
+    worker.render(document, vec![key]).unwrap();
+    worker.close();
+    release.send(()).unwrap();
+    assert!(matches!(
+        received.recv_timeout(Duration::from_millis(100)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    let replacement = worker.open(path.clone()).unwrap();
+    assert!(
+        matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        PdfResponse::Opened(response) if response.request == replacement && response.result.is_ok())
+    );
+    worker.render(document, vec![key]).unwrap();
+    release.send(()).unwrap();
+    assert!(matches!(
+        received.recv_timeout(Duration::from_millis(100)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    let fresh = worker.render(replacement, vec![key]).unwrap();
+    assert!(
+        matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        PdfResponse::Tiles(response) if response.document == replacement && response.request == fresh
+            && response.result.is_ok())
+    );
+    release.send(()).unwrap();
+    drop(worker);
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_dir(directory).unwrap();
+}
+
+#[test]
 fn snapshot_accepts_unicode_path_and_releases_original_file() {
     let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(".scratch")

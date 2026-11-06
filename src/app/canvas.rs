@@ -1,6 +1,7 @@
 //! Compose workspace widgets and apply their actions to page/view state.
 
 mod area;
+mod pdf_preview;
 mod status_bar;
 mod toolbar;
 
@@ -13,7 +14,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     document::{CanvasViewport, PageGeometry, Point, Rect, Rotation, ViewTransform},
-    pdf::{LoadedPdf, OpenResponse, PdfWorker},
+    pdf::{LoadedPdf, OpenResponse, PdfResponse, PdfWorker},
     render::CanvasScene,
 };
 
@@ -27,6 +28,7 @@ pub(super) struct CanvasWorkspace {
     area: CanvasArea,
     worker: PdfWorker,
     pdf: Option<LoadedPdf>,
+    preview: Option<pdf_preview::PdfPreview>,
     pending: Option<u64>,
     message: Option<String>,
     open_requested: bool,
@@ -35,7 +37,7 @@ pub(super) struct CanvasWorkspace {
 impl CanvasWorkspace {
     pub fn new(proxy: EventLoopProxy<UserEvent>) -> Result<Self> {
         let worker = PdfWorker::new(move |response| {
-            let _ = proxy.send_event(UserEvent::PdfOpened(Box::new(response)));
+            let _ = proxy.send_event(UserEvent::PdfResponse(Box::new(response)));
         })?;
         Ok(Self {
             // Synthetic A4-sized CropBox, deliberately offset in PDF user space.
@@ -47,6 +49,7 @@ impl CanvasWorkspace {
             area: CanvasArea::default(),
             worker,
             pdf: None,
+            preview: None,
             pending: None,
             message: None,
             open_requested: false,
@@ -54,6 +57,9 @@ impl CanvasWorkspace {
     }
 
     pub fn open_pdf(&mut self, path: PathBuf) {
+        if let Some(preview) = self.preview.as_mut() {
+            preview.cancel(&self.worker);
+        }
         match self.worker.open(path) {
             Ok(request) => {
                 self.pending = Some(request);
@@ -66,7 +72,20 @@ impl CanvasWorkspace {
         }
     }
 
-    pub fn pdf_opened(&mut self, response: OpenResponse) {
+    pub fn pdf_response(&mut self, response: PdfResponse) {
+        match response {
+            PdfResponse::Opened(response) => self.pdf_opened(response),
+            PdfResponse::Tiles(response) => {
+                if let Some(preview) = self.preview.as_mut()
+                    && let Err(error) = preview.receive(response)
+                {
+                    self.message = Some(format!("Detail render failed: {error}"));
+                }
+            }
+        }
+    }
+
+    fn pdf_opened(&mut self, response: OpenResponse) {
         if self.pending != Some(response.request) {
             return;
         }
@@ -83,6 +102,7 @@ impl CanvasWorkspace {
                     pdf.path.display()
                 ));
                 self.pdf = Some(pdf);
+                self.preview = Some(pdf_preview::PdfPreview::new(response.request));
             }
             Err(error) => self.message = Some(format!("Open failed: {error}")),
         }
@@ -96,6 +116,7 @@ impl CanvasWorkspace {
         self.worker.close();
         self.pending = None;
         self.pdf = None;
+        self.preview = None;
         self.message = None;
         self.page = PageGeometry::new(Rect::new(20.0, 30.0, 615.0, 872.0), Rotation::R0, 1.0)
             .expect("valid built-in test page");
@@ -160,12 +181,18 @@ impl CanvasWorkspace {
                     self.apply_action(action, viewport.logical);
                 }
                 self.apply_interaction(response);
-                CanvasScene {
+                let mut scene = CanvasScene {
                     viewport,
                     page: self.page,
                     view: self.view,
                     bitmap: self.pdf.as_ref().map(|pdf| Arc::clone(&pdf.first_page)),
+                    tiles: Vec::new(),
+                };
+                if let Some(preview) = self.preview.as_mut() {
+                    scene.tiles =
+                        preview.update(ui.ctx(), &self.worker, &scene, self.pending.is_some());
                 }
+                scene
             });
 
         // Refresh toolbar/status readouts after canvas input changes the view.

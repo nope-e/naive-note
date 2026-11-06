@@ -1,21 +1,25 @@
 //! MuPDF stays on one worker; only owned metadata and pixels cross threads.
 
 mod backend;
+mod tiles;
 mod worker;
 
 use std::{path::PathBuf, sync::Arc};
 
-use crate::document::PageGeometry;
+use crate::document::{PageGeometry, Rect};
 
+pub use tiles::{PageTile, TileCache, TileKey, visible_tiles};
 pub use worker::PdfWorker;
 
 pub struct PageBitmap {
     pub width: u32,
     pub height: u32,
     /// Top-down, tightly packed RGBA8; opaque white page background.
-    pub rgba: Vec<u8>,
+    pub rgba: Arc<[u8]>,
     /// Geometry when rasterized, including the PDF's original rotation.
     pub geometry: PageGeometry,
+    /// Image extent in the original, rotated paper coordinate system.
+    pub bounds: Rect,
 }
 
 pub struct LoadedPdf {
@@ -27,4 +31,15 @@ pub struct LoadedPdf {
 pub struct OpenResponse {
     pub request: u64,
     pub result: Result<LoadedPdf, String>,
+}
+
+pub struct TileResponse {
+    pub document: u64,
+    pub request: u64,
+    pub result: Result<Vec<Arc<PageTile>>, String>,
+}
+
+pub enum PdfResponse {
+    Opened(OpenResponse),
+    Tiles(TileResponse),
 }
