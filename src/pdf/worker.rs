@@ -23,6 +23,7 @@ enum Command {
     Render {
         document: u64,
         request: u64,
+        pages: Vec<u32>,
         keys: Vec<TileKey>,
     },
     Close,
@@ -62,7 +63,7 @@ impl PdfWorker {
                             if request != worker_latest.load(Ordering::Acquire) {
                                 continue;
                             }
-                            let result = PdfSession::open(&path).and_then(|opened| {
+                            let result = PdfSession::open(&path).and_then(|mut opened| {
                                 if request != worker_latest.load(Ordering::Acquire) {
                                     return Ok(None);
                                 }
@@ -88,38 +89,56 @@ impl PdfWorker {
                         Command::Render {
                             document,
                             request,
+                            pages,
                             keys,
                         } => {
                             if request != worker_render.load(Ordering::Acquire) {
                                 continue;
                             }
-                            let Some((id, opened)) = session.as_ref() else {
+                            let Some((id, opened)) = session.as_mut() else {
                                 continue;
                             };
                             if *id != document {
                                 continue;
                             }
-                            let mut tiles = Vec::with_capacity(keys.len());
-                            let mut error = None;
-                            for key in keys {
+                            // Deliver each completed item so a complex later page
+                            // cannot delay already available visible content.
+                            let count = pages.len() + keys.len();
+                            let items = pages.into_iter().map(Ok).chain(keys.into_iter().map(Err));
+                            for (position, item) in items.enumerate() {
                                 if request != worker_render.load(Ordering::Acquire) {
                                     break;
                                 }
-                                match opened.render_tile(key) {
-                                    Ok(tile) => tiles.push(Arc::new(tile)),
-                                    Err(cause) => {
-                                        log::warn!("MuPDF tile render failed: {cause:#}");
-                                        error = Some(format!("{cause:#}"));
-                                        break;
+                                let mut previews = Vec::new();
+                                let page = match item {
+                                    Ok(page) => page,
+                                    Err(key) => key.page,
+                                };
+                                let result = match item {
+                                    Ok(page) => opened.render_preview(page).map(|bitmap| {
+                                        previews.push((page, Arc::new(bitmap)));
+                                        Vec::new()
+                                    }),
+                                    Err(key) => {
+                                        opened.render_tile(key).map(|tile| vec![Arc::new(tile)])
                                     }
                                 }
-                            }
-                            if request == worker_render.load(Ordering::Acquire) {
+                                .map_err(|error| format!("{error:#}"));
+                                let failed = result.is_err();
+                                if request != worker_render.load(Ordering::Acquire) {
+                                    break;
+                                }
                                 deliver(PdfResponse::Tiles(TileResponse {
                                     document,
                                     request,
-                                    result: error.map_or_else(|| Ok(tiles), Err),
+                                    page,
+                                    previews,
+                                    complete: failed || position + 1 == count,
+                                    result,
                                 }));
+                                if failed {
+                                    break;
+                                }
                             }
                         }
                         Command::ExportProbe {
@@ -186,12 +205,18 @@ impl PdfWorker {
         let _ = self.sender.send(Command::Close);
     }
 
+    #[cfg(test)]
     pub fn render(&self, document: u64, keys: Vec<TileKey>) -> Result<u64> {
+        self.render_pages(document, Vec::new(), keys)
+    }
+
+    pub fn render_pages(&self, document: u64, pages: Vec<u32>, keys: Vec<TileKey>) -> Result<u64> {
         let request = self.cancel_render();
         self.sender
             .send(Command::Render {
                 document,
                 request,
+                pages,
                 keys,
             })
             .context("MuPDF worker stopped")?;

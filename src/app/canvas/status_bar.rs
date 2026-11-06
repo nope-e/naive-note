@@ -7,7 +7,7 @@ pub(super) fn show(
     page: PageGeometry,
     zoom: f64,
     fit_to_page: bool,
-    pointer: Option<(Point, Point)>,
+    pointer: Option<(u32, Point, Point)>,
     document_label: &str,
     message: Option<&str>,
 ) {
@@ -27,10 +27,14 @@ pub(super) fn show(
                 ))
                 .truncate(),
             );
-            let coordinates = if let Some((paper, pdf)) = pointer {
+            let coordinates = if let Some((index, paper, pdf)) = pointer {
                 format!(
-                    "Paper ({:.1}, {:.1}) pt | PDF ({:.1}, {:.1})",
-                    paper.x, paper.y, pdf.x, pdf.y
+                    "Page {} | Paper ({:.1}, {:.1}) pt | PDF ({:.1}, {:.1})",
+                    index + 1,
+                    paper.x,
+                    paper.y,
+                    pdf.x,
+                    pdf.y
                 )
             } else {
                 "Pointer outside paper".to_owned()

@@ -15,6 +15,7 @@ const MAX_VISIBLE_TILES: usize = 96;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TileKey {
+    pub page: u32,
     /// Half-octaves: round up so raster density is at least the display density.
     pub level: i16,
     pub x: u32,
@@ -47,6 +48,7 @@ pub fn visible_tiles(
     page: PageGeometry,
     view: ViewTransform,
     viewport: CanvasViewport,
+    page_index: u32,
 ) -> Vec<TileKey> {
     let density = view.scale() * viewport.pixels_per_point;
     let size = preview.geometry.paper_size();
@@ -89,7 +91,13 @@ pub fn visible_tiles(
 
     let mut level = (density.log2() * 2.0).ceil().clamp(-16.0, 16.0) as i16;
     loop {
-        let scale = TileKey { level, x: 0, y: 0 }.scale();
+        let scale = TileKey {
+            page: 0,
+            level,
+            x: 0,
+            y: 0,
+        }
+        .scale();
         let grid = scale / f64::from(TILE_EDGE);
         let left = (visible.min.x * grid).floor() as u32;
         let top = (visible.min.y * grid).floor() as u32;
@@ -100,7 +108,12 @@ pub fn visible_tiles(
             let mut keys = Vec::with_capacity(count as usize);
             for y in top..bottom {
                 for x in left..right {
-                    keys.push(TileKey { level, x, y });
+                    keys.push(TileKey {
+                        page: page_index,
+                        level,
+                        x,
+                        y,
+                    });
                 }
             }
             return keys;
@@ -161,7 +174,7 @@ mod tests {
                 CanvasViewport::new(Rect::new(0.0, 0.0, 800.0, 600.0), dpi, (1600, 1200)).unwrap();
             let mut view = ViewTransform::default();
             view.set_zoom_at(8.0, Point::default());
-            let keys = visible_tiles(&preview, preview.geometry, view, viewport);
+            let keys = visible_tiles(&preview, preview.geometry, view, viewport, 0);
             assert!(!keys.is_empty());
             let density = view.scale() * dpi;
             assert!(keys[0].scale() >= density);
@@ -183,10 +196,10 @@ mod tests {
         let viewport =
             CanvasViewport::new(Rect::new(0.0, 0.0, 800.0, 600.0), 1.0, (800, 600)).unwrap();
         let mut view = ViewTransform::default();
-        assert!(visible_tiles(&preview, preview.geometry, view, viewport).is_empty());
+        assert!(visible_tiles(&preview, preview.geometry, view, viewport, 0).is_empty());
         view.set_zoom_at(8.0, Point::default());
         view.pan(Point::new(2000.0, 2000.0));
-        assert!(visible_tiles(&preview, preview.geometry, view, viewport).is_empty());
+        assert!(visible_tiles(&preview, preview.geometry, view, viewport, 0).is_empty());
     }
 
     #[test]
@@ -206,7 +219,7 @@ mod tests {
                 (original.next().next().next(), Point::new(size.width, 0.0)),
             ] {
                 let page = preview.geometry.with_rotation(rotation);
-                let keys = visible_tiles(&preview, page, view, viewport);
+                let keys = visible_tiles(&preview, page, view, viewport, 0);
                 let corner = Point::new(
                     expected.x.min(size.width - 0.01),
                     expected.y.min(size.height - 0.01),
@@ -230,7 +243,7 @@ mod tests {
         .unwrap();
         let mut view = ViewTransform::default();
         view.set_zoom_at(8.0, Point::default());
-        let keys = visible_tiles(&preview, preview.geometry, view, viewport);
+        let keys = visible_tiles(&preview, preview.geometry, view, viewport, 0);
         assert!(!keys.is_empty() && keys.len() <= MAX_VISIBLE_TILES);
         let max_edge = (TILE_EDGE + TILE_OVERLAP * 2) as usize;
         assert!(keys.len() * max_edge * max_edge * 4 < TILE_CACHE_BYTES);
@@ -245,7 +258,12 @@ mod tests {
         let pixels = Arc::clone(&bitmap.rgba);
         for x in 0..128 {
             cache.insert(Arc::new(PageTile {
-                key: TileKey { level: 8, x, y: 0 },
+                key: TileKey {
+                    page: 0,
+                    level: 8,
+                    x,
+                    y: 0,
+                },
                 bitmap: PageBitmap {
                     rgba: Arc::clone(&pixels),
                     ..preview()
@@ -253,6 +271,7 @@ mod tests {
             }));
         }
         let oldest = TileKey {
+            page: 0,
             level: 8,
             x: 0,
             y: 0,
@@ -261,6 +280,7 @@ mod tests {
         assert!(Arc::ptr_eq(&pixels, &reused.bitmap.rgba));
         cache.insert(Arc::new(PageTile {
             key: TileKey {
+                page: 0,
                 level: 8,
                 x: 128,
                 y: 0,
@@ -271,6 +291,7 @@ mod tests {
         assert!(
             cache
                 .get(TileKey {
+                    page: 0,
                     level: 8,
                     x: 1,
                     y: 0
@@ -280,5 +301,38 @@ mod tests {
         assert!(Arc::ptr_eq(&reused, &cache.get(oldest).unwrap()));
         cache.insert(Arc::clone(&reused));
         assert_eq!(cache.bytes, TILE_CACHE_BYTES);
+    }
+
+    #[test]
+    fn identical_tile_coordinates_on_different_pages_have_separate_cache_entries() {
+        let mut cache = TileCache::default();
+        let key = TileKey {
+            page: 0,
+            level: 3,
+            x: 0,
+            y: 0,
+        };
+        let first = Arc::new(PageTile {
+            key,
+            bitmap: preview(),
+        });
+        let second = Arc::new(PageTile {
+            key: TileKey { page: 1, ..key },
+            bitmap: preview(),
+        });
+        cache.insert(Arc::clone(&first));
+        cache.insert(Arc::clone(&second));
+        assert!(Arc::ptr_eq(&cache.get(key).unwrap(), &first));
+        assert!(Arc::ptr_eq(
+            &cache.get(TileKey { page: 1, ..key }).unwrap(),
+            &second
+        ));
+        let viewport =
+            CanvasViewport::new(Rect::new(0.0, 0.0, 800.0, 600.0), 2.0, (1600, 1200)).unwrap();
+        let mut view = ViewTransform::default();
+        view.set_zoom_at(8.0, Point::default());
+        let keys = visible_tiles(&first.bitmap, first.bitmap.geometry, view, viewport, 7);
+        assert!(!keys.is_empty());
+        assert!(keys.iter().all(|key| key.page == 7));
     }
 }

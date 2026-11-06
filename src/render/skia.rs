@@ -22,7 +22,7 @@ use super::{CanvasScene, page};
 pub(super) struct SkiaRenderer {
     // The wrapped framebuffer must be released before its DirectContext.
     surface: Option<Surface>,
-    page_image: Option<(Arc<PageBitmap>, Image)>,
+    page_images: HashMap<u32, (Arc<PageBitmap>, Image)>,
     tile_images: HashMap<TileKey, (Arc<PageTile>, Image)>,
     context: DirectContext,
     size: PhysicalSize<u32>,
@@ -40,7 +40,7 @@ impl SkiaRenderer {
         context.set_resource_cache_limit(128 * 1024 * 1024);
         let mut renderer = Self {
             surface: None,
-            page_image: None,
+            page_images: HashMap::new(),
             tile_images: HashMap::new(),
             context,
             size: PhysicalSize::new(0, 0),
@@ -94,34 +94,36 @@ impl SkiaRenderer {
     }
 
     pub fn draw(&mut self, scene: Option<&CanvasScene>) -> Result<()> {
-        let bitmap = scene.and_then(|scene| scene.bitmap.as_ref());
-        if let Some(bitmap) = bitmap {
-            if !self
-                .page_image
-                .as_ref()
-                .is_some_and(|(cached, _)| Arc::ptr_eq(cached, bitmap))
+        let pages = scene.map_or(&[][..], |scene| scene.pages.as_slice());
+        self.page_images.retain(|index, (cached, _)| {
+            pages.iter().any(|page| {
+                page.index == *index
+                    && page
+                        .bitmap
+                        .as_ref()
+                        .is_some_and(|bitmap| Arc::ptr_eq(cached, bitmap))
+            })
+        });
+        for page in pages {
+            if let Some(bitmap) = &page.bitmap
+                && let Entry::Vacant(entry) = self.page_images.entry(page.index)
             {
-                let image = page_image(bitmap)?;
-                self.page_image = Some((Arc::clone(bitmap), image));
+                entry.insert((Arc::clone(bitmap), page_image(bitmap)?));
             }
-        } else {
-            self.page_image = None;
         }
         // Retain only visible images. CPU pixels are shared with the LRU rather
         // than copied again into Skia; its GPU resource cache has a separate cap.
-        let tiles = scene.map_or(&[][..], |scene| scene.tiles.as_slice());
+        let tiles: Vec<_> = pages.iter().flat_map(|page| &page.tiles).collect();
         self.tile_images.retain(|key, (cached, _)| {
             tiles
                 .iter()
                 .any(|tile| tile.key == *key && Arc::ptr_eq(tile, cached))
         });
-        let mut tile_images = Vec::with_capacity(tiles.len());
-        for tile in tiles {
+        for tile in &tiles {
             if let Entry::Vacant(entry) = self.tile_images.entry(tile.key) {
                 let image = page_image(&tile.bitmap)?;
                 entry.insert((Arc::clone(tile), image));
             }
-            tile_images.push(self.tile_images[&tile.key].1.clone());
         }
         let Some(surface) = self.surface.as_mut() else {
             return Ok(());
@@ -131,12 +133,20 @@ impl SkiaRenderer {
         let canvas = surface.canvas();
         canvas.clear(Color::from_rgb(0xE7, 0xEC, 0xEA));
         if let Some(scene) = scene {
-            page::draw(
-                canvas,
-                scene,
-                self.page_image.as_ref().map(|(_, image)| image),
-                &tile_images,
-            );
+            for page in &scene.pages {
+                let tile_images: Vec<_> = page
+                    .tiles
+                    .iter()
+                    .map(|tile| self.tile_images[&tile.key].1.clone())
+                    .collect();
+                page::draw(
+                    canvas,
+                    page,
+                    scene.viewport,
+                    self.page_images.get(&page.index).map(|(_, image)| image),
+                    &tile_images,
+                );
+            }
         }
 
         self.context
@@ -150,7 +160,7 @@ impl SkiaRenderer {
 impl Drop for SkiaRenderer {
     fn drop(&mut self) {
         self.surface = None;
-        self.page_image = None;
+        self.page_images.clear();
         self.tile_images.clear();
         // Release while the GL context is still current, including on initialization errors.
         // This also follows rust-skia's recommended shutdown for AMD drivers.

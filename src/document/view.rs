@@ -80,6 +80,13 @@ impl Default for ViewTransform {
 }
 
 impl ViewTransform {
+    /// Use a page-local origin within the continuous document layout.
+    pub fn for_page(self, offset: Point) -> Self {
+        let mut view = self;
+        view.pan(Point::new(offset.x * self.scale(), offset.y * self.scale()));
+        view
+    }
+
     pub fn zoom(self) -> f64 {
         self.zoom
     }

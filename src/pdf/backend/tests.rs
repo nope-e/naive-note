@@ -97,7 +97,7 @@ fn preview_has_bounded_dimensions_and_tightly_packed_rgba() {
         "/MediaBox [0 0 200 300] /Rotate 90",
         "/MediaBox [0 0 20000 30000]",
     ] {
-        let session = PdfSession::from_bytes(&pdf_bytes(attributes)).unwrap();
+        let mut session = PdfSession::from_bytes(&pdf_bytes(attributes)).unwrap();
         let preview = session.preview(Path::new("memory.pdf")).unwrap();
         let bitmap = preview.first_page;
         assert_eq!(preview.page_count, 1);
@@ -113,17 +113,19 @@ fn preview_has_bounded_dimensions_and_tightly_packed_rgba() {
 #[test]
 fn high_resolution_tiles_are_bounded_with_overlap_and_original_page_coordinates() {
     for rotation in [0, 90, 180, 270] {
-        let session = PdfSession::from_bytes(&pdf_bytes(&format!(
+        let mut session = PdfSession::from_bytes(&pdf_bytes(&format!(
             "/MediaBox [-20 -30 220 330] /CropBox [20 30 220 330] /Rotate {rotation}"
         )))
         .unwrap();
         for key in [
             TileKey {
+                page: 0,
                 level: 9,
                 x: 0,
                 y: 0,
             },
             TileKey {
+                page: 0,
                 level: 9,
                 x: 2,
                 y: 3,
@@ -143,17 +145,19 @@ fn high_resolution_tiles_are_bounded_with_overlap_and_original_page_coordinates(
             assert!(
                 (bitmap.bounds.size().height * key.scale() - f64::from(bitmap.height)).abs() < 1e-8
             );
-            assert_eq!(bitmap.geometry, session.geometry);
+            assert_eq!(bitmap.geometry, session.pages[0]);
             let core = key.core();
             assert!(bitmap.bounds.contains(core.min));
             assert!(bitmap.bounds.contains(core.max));
         }
         // Partial last tile must stop at the page's ceil-rounded pixel boundary.
-        let size = session.geometry.paper_size();
+        let size = session.pages[0].paper_size();
         let key = TileKey {
+            page: 0,
             level: 9,
             x: (size.width
                 * TileKey {
+                    page: 0,
                     level: 9,
                     x: 0,
                     y: 0,
@@ -172,6 +176,7 @@ fn high_resolution_tiles_are_bounded_with_overlap_and_original_page_coordinates(
         assert!(
             session
                 .render_tile(TileKey {
+                    page: 0,
                     level: 9,
                     x: 1000,
                     y: 1000
@@ -181,6 +186,7 @@ fn high_resolution_tiles_are_bounded_with_overlap_and_original_page_coordinates(
         assert!(
             session
                 .render_tile(TileKey {
+                    page: 0,
                     level: 100,
                     x: 0,
                     y: 0
@@ -214,13 +220,21 @@ fn worker_refinement_is_superseded_and_preserves_session_after_failed_open() {
         PdfResponse::Opened(response) if response.request == document && response.result.is_ok())
     );
     let key = TileKey {
+        page: 0,
         level: 8,
         x: 0,
         y: 0,
     };
     worker.render(document, vec![key]).unwrap();
     let newest = worker
-        .render(document, vec![TileKey { x: 1, ..key }])
+        .render(
+            document,
+            vec![TileKey {
+                page: 0,
+                x: 1,
+                ..key
+            }],
+        )
         .unwrap();
     release.send(()).unwrap();
     match received.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -319,7 +333,7 @@ fn worker_exports_snapshot_and_keeps_preview_session_available() {
     let source = directory.join("source.pdf");
     let bytes = pdf_bytes("/MediaBox [0 0 200 300] /Rotate 90");
     std::fs::write(&source, &bytes).unwrap();
-    let geometry = PdfSession::from_bytes(&bytes).unwrap().geometry;
+    let geometry = PdfSession::from_bytes(&bytes).unwrap().pages[0];
     let (sender, receiver) = mpsc::channel();
     let worker = PdfWorker::new(move |response| {
         sender.send(response).unwrap();
@@ -352,6 +366,7 @@ fn worker_exports_snapshot_and_keeps_preview_session_available() {
         .render(
             document,
             vec![TileKey {
+                page: 0,
                 level: 0,
                 x: 0,
                 y: 0,
@@ -383,7 +398,7 @@ fn close_invalidates_queued_test_export() {
     let source = directory.join("source.pdf");
     let bytes = pdf_bytes("/MediaBox [0 0 200 300]");
     std::fs::write(&source, &bytes).unwrap();
-    let geometry = PdfSession::from_bytes(&bytes).unwrap().geometry;
+    let geometry = PdfSession::from_bytes(&bytes).unwrap().pages[0];
     let (sender, receiver) = mpsc::channel();
     let (release, wait) = mpsc::channel();
     let worker = PdfWorker::new(move |response| {
@@ -406,5 +421,130 @@ fn close_invalidates_queued_test_export() {
     ));
     drop(worker);
     std::fs::remove_file(source).unwrap();
+    std::fs::remove_dir(directory).unwrap();
+}
+
+fn multipage_pdf() -> Vec<u8> {
+    let mut document = PdfDocument::new();
+    for index in 0..6 {
+        let mut page = document
+            .new_page_at(
+                index,
+                mupdf::Size::new(200.0 + index as f32 * 20.0, 300.0 + index as f32 * 10.0),
+            )
+            .unwrap();
+        page.set_rotation((index % 4) * 90).unwrap();
+        page.object()
+            .dict_put(
+                "UserUnit",
+                mupdf::pdf::PdfObject::new_real(1.0 + index as f32 * 0.25).unwrap(),
+            )
+            .unwrap();
+    }
+    let mut bytes = Vec::new();
+    document.write_to(&mut bytes).unwrap();
+    bytes
+}
+
+#[test]
+fn mixed_page_previews_and_tiles_use_the_requested_geometry_with_bounded_display_lists() {
+    let mut session = PdfSession::from_bytes(&multipage_pdf()).unwrap();
+    let loaded = session.preview(Path::new("multi.pdf")).unwrap();
+    assert_eq!(loaded.page_count, 6);
+    assert_eq!(loaded.pages.len(), 6);
+    for index in [5, 1, 4, 2, 0, 3, 5] {
+        let geometry = loaded.pages[index as usize];
+        let bitmap = session.render_preview(index).unwrap();
+        assert_eq!(bitmap.geometry, geometry);
+        assert_eq!(bitmap.bounds.size(), geometry.paper_size());
+        assert_eq!(
+            bitmap.rgba.len(),
+            bitmap.width as usize * bitmap.height as usize * 4
+        );
+        let key = TileKey {
+            page: index,
+            level: 3,
+            x: 0,
+            y: 0,
+        };
+        let tile = session.render_tile(key).unwrap();
+        assert_eq!(tile.key.page, index);
+        assert_eq!(tile.bitmap.geometry, geometry);
+        assert!(session.prepared.len() <= 4);
+    }
+    assert!(session.render_preview(6).is_err());
+    assert!(
+        session
+            .render_tile(TileKey {
+                page: 6,
+                level: 3,
+                x: 0,
+                y: 0
+            })
+            .is_err()
+    );
+}
+
+#[test]
+fn multipage_worker_delivers_incremental_previews_and_close_cancels_the_rest() {
+    use crate::pdf::{PdfResponse, PdfWorker};
+    use std::{sync::mpsc, time::Duration};
+
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".scratch")
+        .join(format!("multipage-worker-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("multi.pdf");
+    std::fs::write(&path, multipage_pdf()).unwrap();
+    let (send, received) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let worker = PdfWorker::new(move |response| {
+        send.send(response).unwrap();
+        let _ = wait.recv_timeout(Duration::from_secs(5));
+    })
+    .unwrap();
+    let document = worker.open(path.clone()).unwrap();
+    assert!(
+        matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        PdfResponse::Opened(response) if response.result.as_ref().unwrap().pages.len() == 6)
+    );
+    let request = worker.render_pages(document, vec![2, 4], vec![]).unwrap();
+    release.send(()).unwrap();
+    match received.recv_timeout(Duration::from_secs(5)).unwrap() {
+        PdfResponse::Tiles(response) => {
+            assert_eq!(response.request, request);
+            assert_eq!(response.document, document);
+            assert!(!response.complete);
+            assert_eq!(response.previews[0].0, 2);
+        }
+        _ => panic!("expected a page preview"),
+    }
+    release.send(()).unwrap();
+    match received.recv_timeout(Duration::from_secs(5)).unwrap() {
+        PdfResponse::Tiles(response) => {
+            assert!(response.complete);
+            assert_eq!(response.previews[0].0, 4);
+        }
+        _ => panic!("expected the final preview"),
+    }
+    let superseded = worker.render_pages(document, vec![1], vec![]).unwrap();
+    let newest = worker.render_pages(document, vec![3, 5], vec![]).unwrap();
+    release.send(()).unwrap();
+    match received.recv_timeout(Duration::from_secs(5)).unwrap() {
+        PdfResponse::Tiles(response) => {
+            assert_ne!(response.request, superseded);
+            assert_eq!(response.request, newest);
+            assert_eq!(response.previews[0].0, 3);
+        }
+        _ => panic!("expected the latest preview request"),
+    }
+    worker.close();
+    release.send(()).unwrap();
+    assert!(matches!(
+        received.recv_timeout(Duration::from_millis(100)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    drop(worker);
+    std::fs::remove_file(path).unwrap();
     std::fs::remove_dir(directory).unwrap();
 }

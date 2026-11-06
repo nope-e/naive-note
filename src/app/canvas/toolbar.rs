@@ -19,6 +19,8 @@ pub(super) struct DocumentActions {
     pub can_close: bool,
     pub can_demo: bool,
     pub can_export_demo: bool,
+    pub current_page: u32,
+    pub page_count: u32,
 }
 
 pub(super) fn show(
@@ -30,6 +32,7 @@ pub(super) fn show(
     fps: Option<f64>,
     document: DocumentActions,
 ) -> Option<ToolbarAction> {
+    let editing_text = ui.ctx().text_edit_focused();
     let mut action = ui.input(|input| {
         if input.modifiers.ctrl && input.key_pressed(egui::Key::O) {
             Some(ToolbarAction::Open)
@@ -39,6 +42,18 @@ pub(super) fn show(
             Some(ToolbarAction::View(ViewAction::Fit))
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::Num1) {
             Some(ToolbarAction::View(ViewAction::ActualSize))
+        } else if input.modifiers.ctrl && input.key_pressed(egui::Key::Num2) {
+            Some(ToolbarAction::View(ViewAction::FitWidth))
+        } else if !editing_text && input.key_pressed(egui::Key::PageUp) {
+            Some(ToolbarAction::View(ViewAction::PreviousPage))
+        } else if !editing_text && input.key_pressed(egui::Key::PageDown) {
+            Some(ToolbarAction::View(ViewAction::NextPage))
+        } else if !editing_text && input.key_pressed(egui::Key::Home) {
+            Some(ToolbarAction::View(ViewAction::GoToPage(0)))
+        } else if !editing_text && input.key_pressed(egui::Key::End) {
+            Some(ToolbarAction::View(ViewAction::GoToPage(
+                document.page_count - 1,
+            )))
         } else {
             None
         }
@@ -79,8 +94,43 @@ pub(super) fn show(
                 action = Some(ToolbarAction::ExportDemo);
             }
             ui.separator();
+            if ui
+                .add_enabled(document.current_page > 0, egui::Button::new("Prev"))
+                .on_hover_text("Page Up")
+                .clicked()
+            {
+                action = Some(ToolbarAction::View(ViewAction::PreviousPage));
+            }
+            let mut number = document.current_page + 1;
+            if ui
+                .add(
+                    egui::DragValue::new(&mut number)
+                        .range(1..=document.page_count)
+                        .update_while_editing(false)
+                        .prefix("Page ")
+                        .suffix(format!(" / {}", document.page_count)),
+                )
+                .on_hover_text("Click to enter a page number, then press Enter")
+                .changed()
+            {
+                action = Some(ToolbarAction::View(ViewAction::GoToPage(number - 1)));
+            }
+            if ui
+                .add_enabled(
+                    document.current_page + 1 < document.page_count,
+                    egui::Button::new("Next"),
+                )
+                .on_hover_text("Page Down")
+                .clicked()
+            {
+                action = Some(ToolbarAction::View(ViewAction::NextPage));
+            }
+            ui.separator();
             if ui.button("Fit page").on_hover_text("Ctrl+0").clicked() {
                 action = Some(ToolbarAction::View(ViewAction::Fit));
+            }
+            if ui.button("Fit width").on_hover_text("Ctrl+2").clicked() {
+                action = Some(ToolbarAction::View(ViewAction::FitWidth));
             }
             if ui.button("100%").on_hover_text("Ctrl+1").clicked() {
                 action = Some(ToolbarAction::View(ViewAction::ActualSize));

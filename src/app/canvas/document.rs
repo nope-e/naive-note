@@ -61,8 +61,8 @@ impl CanvasDocument {
         }
     }
 
-    /// Returns geometry only when a successful open replaces the current page.
-    pub fn receive(&mut self, response: PdfResponse) -> Option<PageGeometry> {
+    /// Returns page geometry only when a successful open replaces the document.
+    pub fn receive(&mut self, response: PdfResponse) -> Option<Vec<PageGeometry>> {
         match response {
             PdfResponse::Opened(response) => self.opened(response),
             PdfResponse::Tiles(response) => {
@@ -89,26 +89,27 @@ impl CanvasDocument {
         }
     }
 
-    fn opened(&mut self, response: OpenResponse) -> Option<PageGeometry> {
+    fn opened(&mut self, response: OpenResponse) -> Option<Vec<PageGeometry>> {
         if self.pending != Some(response.request) {
             return None;
         }
         self.pending = None;
         match response.result {
             Ok(pdf) => {
-                let page = pdf.first_page.geometry;
+                let pages = pdf.pages.clone();
                 self.message = Some(format!(
-                    "{} | {} | First-page preview",
+                    "{} | {} | Continuous reading",
                     pdf.path.display(),
                     pdf.edit_data_status,
                 ));
+                let preview = PdfPreview::new(response.request, Arc::clone(&pdf.first_page));
                 self.loaded = Some(OpenDocument {
                     pdf,
-                    preview: PdfPreview::new(response.request),
+                    preview,
                     demo_stroke: None,
                 });
                 self.loaded_request = Some(response.request);
-                Some(page)
+                Some(pages)
             }
             Err(error) => {
                 self.message = Some(format!("Open failed: {error}"));
@@ -180,10 +181,14 @@ impl CanvasDocument {
         self.loaded.is_some() || self.pending.is_some()
     }
 
-    pub fn label(&self) -> String {
+    pub fn is_loaded(&self) -> bool {
+        self.loaded.is_some()
+    }
+
+    pub fn label(&self, page: u32) -> String {
         self.loaded.as_ref().map_or_else(
             || "Test page 1 / 1".to_owned(),
-            |loaded| format!("PDF page 1 / {}", loaded.pdf.page_count),
+            |loaded| format!("PDF page {} / {}", page + 1, loaded.pdf.page_count),
         )
     }
 
@@ -191,14 +196,23 @@ impl CanvasDocument {
         self.message.as_deref()
     }
 
-    pub fn update_scene(&mut self, context: &egui::Context, scene: &mut CanvasScene) {
+    pub fn update_scene(
+        &mut self,
+        context: &egui::Context,
+        scene: &mut CanvasScene,
+        current_page: u32,
+    ) {
         if let Some(loaded) = self.loaded.as_mut() {
-            scene.bitmap = Some(Arc::clone(&loaded.pdf.first_page));
-            scene.demo_stroke = loaded.demo_stroke.clone();
-            scene.tiles =
-                loaded
-                    .preview
-                    .update(context, &self.worker, scene, self.pending.is_some());
+            if let Some(first) = scene.pages.iter_mut().find(|page| page.index == 0) {
+                first.demo_stroke = loaded.demo_stroke.clone();
+            }
+            loaded.preview.update(
+                context,
+                &self.worker,
+                scene,
+                current_page,
+                self.pending.is_some(),
+            );
         }
     }
 }

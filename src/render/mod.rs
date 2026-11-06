@@ -21,11 +21,18 @@ use crate::{
 #[derive(Clone)]
 pub struct CanvasScene {
     pub viewport: CanvasViewport,
+    pub pages: Vec<PageScene>,
+}
+
+#[derive(Clone)]
+pub struct PageScene {
+    pub index: u32,
     pub page: PageGeometry,
     pub view: ViewTransform,
     pub bitmap: Option<Arc<PageBitmap>>,
     pub tiles: Vec<Arc<PageTile>>,
     pub demo_stroke: Option<Arc<crate::document::StrokeRecord>>,
+    pub test_page: bool,
 }
 
 pub struct Renderer {

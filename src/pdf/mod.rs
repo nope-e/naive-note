@@ -28,6 +28,7 @@ pub struct PageBitmap {
 pub struct LoadedPdf {
     pub path: PathBuf,
     pub page_count: u32,
+    pub pages: Vec<PageGeometry>,
     pub first_page: Arc<PageBitmap>,
     pub edit_data_status: String,
 }
@@ -40,6 +41,9 @@ pub struct OpenResponse {
 pub struct TileResponse {
     pub document: u64,
     pub request: u64,
+    pub page: u32,
+    pub previews: Vec<(u32, Arc<PageBitmap>)>,
+    pub complete: bool,
     pub result: Result<Vec<Arc<PageTile>>, String>,
 }
 

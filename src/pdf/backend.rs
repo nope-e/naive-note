@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read, path::Path, sync::Arc};
+use std::{collections::VecDeque, fs::File, io::Read, path::Path, sync::Arc};
 
 use anyhow::{Context, Result, ensure};
 use mupdf::{
@@ -14,14 +14,19 @@ use super::{
 };
 
 // Fast full-page fallback; visible tiles supply the display's actual resolution.
-const MAX_BITMAP_EDGE: u32 = 2048;
-const PREVIEW_SCALE: f32 = 2.0;
+const MAX_BITMAP_EDGE: u32 = 1024;
+const PREVIEW_SCALE: f32 = 1.0;
 const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
 
 pub(super) struct PdfSession {
     base: Arc<[u8]>,
     document: PdfDocument,
-    geometry: PageGeometry,
+    pages: Vec<PageGeometry>,
+    prepared: VecDeque<PreparedPage>,
+}
+
+struct PreparedPage {
+    index: u32,
     bounds: mupdf::Rect,
     display_list: DisplayList,
 }
@@ -53,26 +58,17 @@ impl PdfSession {
             "Password-protected PDFs are not supported yet"
         );
         ensure!(document.page_count()? > 0, "PDF has no pages");
-        let page =
-            PdfPage::try_from(document.load_page(0)?).context("Cannot load first PDF page")?;
-        let geometry = page_geometry(&page)?;
-        let bounds = page.bounds()?;
-        ensure!(
-            bounds.width().is_finite()
-                && bounds.height().is_finite()
-                && bounds.width() > 0.0
-                && bounds.height() > 0.0,
-            "Invalid PDF page bounds"
-        );
-        let display_list = page
-            .to_display_list(true)
-            .context("Cannot prepare PDF page")?;
+        let mut pages = Vec::new();
+        for index in 0..document.page_count()? {
+            let page = PdfPage::try_from(document.load_page(index)?)
+                .with_context(|| format!("Cannot load PDF page {}", index + 1))?;
+            pages.push(page_geometry(&page)?);
+        }
         Ok(Self {
             base: bytes.into(),
             document,
-            geometry,
-            bounds,
-            display_list,
+            pages,
+            prepared: VecDeque::new(),
         })
     }
 
@@ -89,44 +85,87 @@ impl PdfSession {
         PdfPage::try_from(self.document.load_page(0)?).context("Cannot load first PDF page")
     }
 
-    pub fn preview(&self, path: &Path) -> Result<LoadedPdf> {
-        let bounds = self.bounds;
+    pub fn preview(&mut self, path: &Path) -> Result<LoadedPdf> {
+        Ok(LoadedPdf {
+            path: path.to_owned(),
+            page_count: self.pages.len() as u32,
+            pages: self.pages.clone(),
+            edit_data_status: super::save::edit_data_status(&self.document),
+            first_page: Arc::new(self.render_preview(0)?),
+        })
+    }
+
+    fn prepare(&mut self, index: u32) -> Result<&PreparedPage> {
+        ensure!(
+            (index as usize) < self.pages.len(),
+            "PDF page is out of range"
+        );
+        if let Some(position) = self.prepared.iter().position(|page| page.index == index) {
+            let page = self.prepared.remove(position).unwrap();
+            self.prepared.push_back(page);
+        } else {
+            let page = PdfPage::try_from(self.document.load_page(index as i32)?)?;
+            let bounds = page.bounds()?;
+            let display_list = page
+                .to_display_list(true)
+                .context("Cannot prepare PDF page")?;
+            // A small LRU bounds the number of engine display lists, independent
+            // of document length. Pixel caches have their own byte budgets.
+            if self.prepared.len() == 4 {
+                self.prepared.pop_front();
+            }
+            self.prepared.push_back(PreparedPage {
+                index,
+                bounds,
+                display_list,
+            });
+        }
+        Ok(self.prepared.back().unwrap())
+    }
+
+    pub fn render_preview(&mut self, index: u32) -> Result<PageBitmap> {
+        let geometry = *self
+            .pages
+            .get(index as usize)
+            .context("PDF page is out of range")?;
+        let prepared = self.prepare(index)?;
+        let bounds = prepared.bounds;
         // Leave room for MuPDF's floor/ceil rounding of the raster bounds.
         let scale =
             PREVIEW_SCALE.min((MAX_BITMAP_EDGE - 2) as f32 / bounds.width().max(bounds.height()));
         ensure!(scale.is_finite() && scale > 0.0, "Invalid PDF render scale");
-        let pixmap = self
+        let pixmap = prepared
             .display_list
             .to_pixmap(
                 &Matrix::new_scale(scale, scale),
                 &Colorspace::device_rgb(),
                 false,
             )
-            .context("Cannot render first PDF page")?;
+            .context("Cannot render PDF preview")?;
         let (width, height) = (pixmap.width(), pixmap.height());
         ensure!(
             width > 0 && height > 0 && width <= MAX_BITMAP_EDGE && height <= MAX_BITMAP_EDGE,
             "PDF preview exceeds bitmap limits"
         );
-        let size = self.geometry.paper_size();
-        Ok(LoadedPdf {
-            path: path.to_owned(),
-            page_count: u32::try_from(self.document.page_count()?)?,
-            edit_data_status: super::save::edit_data_status(&self.document),
-            first_page: Arc::new(PageBitmap {
-                width,
-                height,
-                rgba: rgba_pixels(&pixmap)?.into(),
-                geometry: self.geometry,
-                bounds: Rect::new(0.0, 0.0, size.width, size.height),
-            }),
+        let size = geometry.paper_size();
+        Ok(PageBitmap {
+            width,
+            height,
+            rgba: rgba_pixels(&pixmap)?.into(),
+            geometry,
+            bounds: Rect::new(0.0, 0.0, size.width, size.height),
         })
     }
 
-    pub fn render_tile(&self, key: TileKey) -> Result<PageTile> {
+    pub fn render_tile(&mut self, key: TileKey) -> Result<PageTile> {
         ensure!((-16..=16).contains(&key.level), "Invalid PDF tile level");
         let scale = key.scale();
-        let size = self.geometry.paper_size();
+        let geometry = *self
+            .pages
+            .get(key.page as usize)
+            .context("PDF page is out of range")?;
+        let prepared = self.prepare(key.page)?;
+        let size = geometry.paper_size();
         let left = f64::from(key.x) * f64::from(TILE_EDGE);
         let top = f64::from(key.y) * f64::from(TILE_EDGE);
         ensure!(
@@ -152,10 +191,11 @@ impl PdfSession {
             0.0,
             0.0,
             scale as f32,
-            -self.bounds.x0 * scale as f32,
-            -self.bounds.y0 * scale as f32,
+            -prepared.bounds.x0 * scale as f32,
+            -prepared.bounds.y0 * scale as f32,
         );
-        self.display_list
+        prepared
+            .display_list
             .run(
                 &device,
                 &matrix,
@@ -170,7 +210,7 @@ impl PdfSession {
                 width: pixmap.width(),
                 height: pixmap.height(),
                 rgba: rgba_pixels(&pixmap)?.into(),
-                geometry: self.geometry,
+                geometry,
                 bounds: Rect::new(x0 / scale, y0 / scale, x1 / scale, y1 / scale),
             },
         })

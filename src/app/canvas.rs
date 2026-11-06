@@ -66,11 +66,15 @@ impl CanvasWorkspace {
         framebuffer: (u32, u32),
         process_input: bool,
     ) -> Option<CanvasScene> {
-        let before = self.view;
+        let before = (
+            self.view.transform,
+            self.view.current_page(),
+            self.view.page(),
+        );
         let mut action = toolbar::show(
             ui,
             self.view.transform.zoom(),
-            self.view.page,
+            self.view.page(),
             self.view.viewport,
             show_renderer_info,
             fps,
@@ -78,6 +82,8 @@ impl CanvasWorkspace {
                 can_close: self.document.can_close(),
                 can_demo: self.document.can_demo(),
                 can_export_demo: self.document.can_export_demo(),
+                current_page: self.view.current_page(),
+                page_count: self.view.page_count(),
             },
         );
         if process_input {
@@ -101,7 +107,7 @@ impl CanvasWorkspace {
                 _ => {}
             }
         }
-        let document_label = self.document.label();
+        let document_label = self.document.label(self.view.current_page());
         let pointer = ui
             .input(|input| input.pointer.hover_pos())
             .and_then(|pointer| {
@@ -110,7 +116,7 @@ impl CanvasWorkspace {
             });
         status_bar::show(
             ui,
-            self.view.page,
+            self.view.page(),
             self.view.transform.zoom(),
             self.view.fit_to_page,
             pointer,
@@ -130,18 +136,21 @@ impl CanvasWorkspace {
                 self.view.apply_interaction(response);
                 let mut scene = CanvasScene {
                     viewport,
-                    page: self.view.page,
-                    view: self.view.transform,
-                    bitmap: None,
-                    tiles: Vec::new(),
-                    demo_stroke: None,
+                    pages: self.view.scenes(viewport, !self.document.is_loaded()),
                 };
-                self.document.update_scene(ui.ctx(), &mut scene);
+                self.document
+                    .update_scene(ui.ctx(), &mut scene, self.view.current_page());
                 scene
             });
 
         // Refresh toolbar/status readouts after canvas input changes the view.
-        if before != self.view {
+        if before
+            != (
+                self.view.transform,
+                self.view.current_page(),
+                self.view.page(),
+            )
+        {
             ui.ctx().request_repaint();
         }
         scene

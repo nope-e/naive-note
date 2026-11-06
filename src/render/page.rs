@@ -4,16 +4,16 @@ use skia_safe::{
     Canvas, Color, FilterMode, Image, Paint, Rect as SkRect, SamplingOptions, paint::Style,
 };
 
-use super::{CanvasScene, test_page};
-use crate::document::{PathCommand, Point, StrokeRecord};
+use super::{PageScene, test_page};
+use crate::document::{CanvasViewport, PathCommand, Point, StrokeRecord};
 
 pub(super) fn draw(
     canvas: &Canvas,
-    scene: &CanvasScene,
+    scene: &PageScene,
+    viewport: CanvasViewport,
     image: Option<&Image>,
     tile_images: &[Image],
 ) {
-    let viewport = scene.viewport;
     let top_left = viewport.logical_to_physical(viewport.logical.min);
     let bottom_right = viewport.logical_to_physical(viewport.logical.max);
     let size = scene.page.paper_size();
@@ -109,7 +109,7 @@ pub(super) fn draw(
         if let Some(stroke) = &scene.demo_stroke {
             draw_stroke(canvas, stroke);
         }
-    } else {
+    } else if scene.test_page {
         test_page::draw_contents(canvas, scene.page);
     }
     canvas.restore();
