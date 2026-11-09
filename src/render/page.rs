@@ -51,25 +51,25 @@ pub(super) fn draw(
 
     canvas.save();
     canvas.clip_rect(paper, None, false);
-    if let (Some(bitmap), Some(image)) = (&scene.bitmap, image) {
-        let original = bitmap.geometry.paper_size();
-        // The bitmap already includes /Rotate. Apply only the user's additional
-        // view rotation so its corners still match the page coordinate model.
-        let degrees = (scene.page.rotation().degrees() - bitmap.geometry.rotation().degrees())
-            .rem_euclid(360);
-        match degrees {
-            90 => {
-                canvas.translate((original.height as f32, 0.0));
-            }
-            180 => {
-                canvas.translate((original.width as f32, original.height as f32));
-            }
-            270 => {
-                canvas.translate((0.0, original.width as f32));
-            }
-            _ => {}
+    // Session ink uses the original page orientation even before its bitmap
+    // arrives. Rotate all page content together, including the active stroke.
+    let original = scene.source_page.paper_size();
+    let degrees =
+        (scene.page.rotation().degrees() - scene.source_page.rotation().degrees()).rem_euclid(360);
+    match degrees {
+        90 => {
+            canvas.translate((original.height as f32, 0.0));
         }
-        canvas.rotate(degrees as f32, None);
+        180 => {
+            canvas.translate((original.width as f32, original.height as f32));
+        }
+        270 => {
+            canvas.translate((0.0, original.width as f32));
+        }
+        _ => {}
+    }
+    canvas.rotate(degrees as f32, None);
+    if let (Some(_), Some(image)) = (&scene.bitmap, image) {
         canvas.draw_image_rect_with_sampling_options(
             image,
             None,
@@ -106,11 +106,16 @@ pub(super) fn draw(
             );
             canvas.restore();
         }
-        if let Some(stroke) = &scene.demo_stroke {
-            draw_stroke(canvas, stroke);
-        }
     } else if scene.test_page {
-        test_page::draw_contents(canvas, scene.page);
+        test_page::draw_contents(canvas, scene.source_page);
+    }
+    for stroke in scene
+        .strokes
+        .iter()
+        .chain(scene.demo_stroke.iter())
+        .chain(scene.active_stroke.iter())
+    {
+        draw_stroke(canvas, stroke);
     }
     canvas.restore();
 

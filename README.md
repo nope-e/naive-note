@@ -1,6 +1,6 @@
 # Naive Note
 
-Windows 本地 PDF 手写笔记应用。已接入 MuPDF 连续纵向多页阅读、页码定位和可见页高清分块，以及第 3 步的模拟压感笔迹保存验证：可预览一条变宽笔迹，将标准 Ink 批注、自定义外观和 CBOR＋Zstd 编辑附件导出为独立测试 PDF，再回读校验。2026-11-07 用户已确认多页阅读总体视觉无问题；此前模拟压感导出样本也已获查看确认。DPI、性能、具体交互，以及 Edge、Acrobat 与打印的逐项结果仍待记录。真实笔输入和正式 Ctrl+S 保存尚未实现。
+Windows 本地 PDF 手写笔记应用。已接入 MuPDF 连续纵向多页阅读、页码定位和可见页高清分块，以及第 3 步的模拟压感笔迹保存验证：可预览一条变宽笔迹，将标准 Ink 批注、自定义外观和 CBOR＋Zstd 编辑附件导出为独立测试 PDF，再回读校验。2026-11-07 用户已确认多页阅读总体视觉无问题；此前模拟压感导出样本也已获查看确认。DPI、性能、具体交互，以及 Edge、Acrobat 与打印的逐项结果仍待记录。2026-11-09 已接入 crates.io 的 `tablet-input-windows` 1.0.0，支持 Direct 实时压感书写和固定压力鼠标调试；用户同日反馈“没问题了 我测过了”，当前书写效果总体已确认；DPI、跨屏和性能专项仍待记录。新增笔迹当前只在会话内保留，正式 Ctrl+S、撤销重做和恢复尚未实现。
 
 ## 构建与运行
 
@@ -37,16 +37,24 @@ cargo run --locked -- 'D:\documents\中文示例.pdf'
 | 工具栏 `Page` 数字 / Home / End | 点击数字输入页码并回车 / 定位首页 / 末页 |
 | `Close PDF` / Ctrl＋W | 关闭文档、取消待处理结果，返回测试纸面 |
 | `Pressure demo` | 在第一页添加或移除一条模拟压感叠加笔迹 |
-| `Export test PDF` | 将该笔迹保存到项目 `.scratch/pdf-save-probe/<UUID>/pressure.pdf`，校验后自动打开副本 |
+| `Export test PDF` | 仅导出模拟笔迹到项目 `.scratch/pdf-save-probe/<UUID>/pressure.pdf`；存在未保存的会话笔迹时禁用 |
 | 滚轮 / Shift＋滚轮 | 纵向 / 横向滚动 |
 | 右侧 / 底部滚动条 | 拖动滑块或点击轨道定位；该方向无可滚动范围时隐藏，页码随纵向位置更新 |
-| 左键或中键拖动中央画布 | 平移纸面 |
+| 原生笔在纸面落笔 | Direct 压感书写；自动绑定落笔页，越界部分按该页裁剪 |
+| `Mouse pen` | 开启后左键以固定 0.5 压力书写，默认关闭 |
+| Ctrl＋笔 / 左键上下拖动 | 以开始操作的位置为锚点缩放；向上放大、向下缩小 |
+| Alt＋笔 / 左键拖动 | 平移纸面，不产生笔迹 |
+| 左键 / 中键拖动中央画布 | Mouse pen 关闭时左键平移；中键平移 |
 | Ctrl＋滚轮 | 以鼠标位置为锚点缩放，范围 10%—800% |
 | `Fit page` / Ctrl＋0 | 适合当前页，随窗口尺寸调整 |
 | `Fit width` / Ctrl＋2 | 按当前页宽度适合画布，随窗口尺寸调整 |
 | `100%` / Ctrl＋1 | 100% 缩放，保持画布中心锚点 |
 | `-` / `+` | 以画布中心为锚点缩放 |
 | `Rotate 90 deg` | 所有页面顺时针旋转视图 90°，重新适合当前页，不改写 PDF |
+
+原生笔不依赖 Mouse pen 开关。笔可点击工具栏和拖动滚动条；纸面外开始的接触不会中途变成笔迹。书写期间暂停画布平移和缩放；工具栏视图操作会取消当前未完成的一笔。失焦、取消、捕获丢失、调整窗口大小或 DPI 变化也会丢弃活动笔迹。橡皮端暂不落墨。状态栏标记已完成的未保存笔迹数量；关闭、切换文档或退出会清除这些会话记录，当前没有保存和恢复功能。操作步骤见 [笔输入手动验收](docs/ink-validation.zh-CN.md)。
+
+Ctrl 和 Alt 同时按下时优先缩放。书写中按下 Ctrl 或 Alt 会先在最后一个书写采样点终结并提交当前笔画，保留已写出的内容，再从当前位置切换为视图操作；导航采样不接入原笔画，后续抬笔不会重复提交。松开修饰键后暂停该次拖动，抬笔后重新落笔才恢复书写。修饰键对鼠标左键拖动同样生效，不依赖 Mouse pen 开关。UI 上开始的笔操作继续归 UI 所有，不会切换为画布缩放或平移。
 
 100% 时，1 纸面 point（1/72 英寸）对应 96/72 Windows 逻辑像素，再乘 DPI 比例得到物理像素。状态栏显示纸面坐标和原始 PDF 用户空间坐标；MuPDF 的实际页面变换用于读取有效 CropBox、旋转和 UserUnit。
 
@@ -88,11 +96,15 @@ cargo run --offline --locked -- --pdf-inspect '.scratch\pdf-save-probe\<UUID>\pr
 | 路径 | 职责 |
 | --- | --- |
 | `src/main.rs` | 日志与程序入口 |
-| `src/app/` | 窗口生命周期、事件路由、按需重绘和 UI 布局 |
+| `src/app/mod.rs` / `src/app/events.rs` | 事件循环入口、窗口生命周期、事件路由和按需重绘 |
+| `src/app/runtime.rs` / `src/app/runtime/input.rs` | 窗口与渲染资源、帧绘制和原生对话框；笔、鼠标与键盘事件转发 |
 | `src/app/frame_scheduler.rs` | 60 FPS 上限、合并重绘期限；纯时间计算，无窗口操作 |
 | `src/app/canvas.rs` | 组织画布布局、路由文档与视图操作、组装 `CanvasScene` |
 | `src/app/canvas/document.rs` | PDF 打开/关闭、worker 结果与状态消息、当前文档和预览生命周期 |
+| `src/app/canvas/document/probe.rs` | 模拟压力笔迹叠加与独立测试 PDF 导出 |
 | `src/app/canvas/view.rs` | 页面视图状态、适合页面、缩放/平移/旋转、布局重定位及指针坐标换算 |
+| `src/app/canvas/view/scroll.rs` | 连续文档平移边界、滚动条范围与偏移换算；视图测试独立放在 `view/tests.rs` |
+| `src/app/canvas/ink_input.rs` / `src/app/canvas/ink_input/` | 输入归属与笔迹生命周期；按 `pen.rs`、`mouse.rs`、`navigation.rs` 拆分设备与导航手势，`tests/` 按采样、归属、鼠标、导航和工具切换分组 |
 | `src/app/canvas/toolbar.rs` | 工具栏、快捷键、渲染信息；区分文档操作与视图操作 |
 | `src/app/canvas/status_bar.rs` | 页面、缩放和指针坐标的只读状态显示 |
 | `src/app/canvas/area.rs` | 中央区域和滚动条布局、输入归属，将拖动、滚轮和滚动条操作交给视图 |
@@ -100,6 +112,7 @@ cargo run --offline --locked -- --pdf-inspect '.scratch\pdf-save-probe\<UUID>\pr
 | `src/app/canvas/pdf_preview.rs` | 高清补图防抖、请求生命周期及过时结果过滤 |
 | `src/document/` | 页面几何、连续页面布局、可见页查找、CropBox / 旋转 / UserUnit 与坐标转换 |
 | `src/document/stroke.rs` / `src/ink/` | 最小笔迹模型、原始采样、参数快照、可序列化轮廓和模拟压力样本 |
+| `src/ink/direct.rs` / `src/ink/target.rs` / `src/ink/outline.rs` | Direct 笔迹增量采样与快照、落笔时冻结的页面/视图/DPI 坐标映射、圆角变宽轮廓 |
 | `src/platform/` | 原生窗口、GL 上下文、窗口 surface、vsync 与交换缓冲 |
 | `src/render/` | egui 输入和绘制、共享 GL 状态切换、Skia 帧缓冲包装与资源释放 |
 | `src/pdf/` | MuPDF worker、内存会话快照、各页几何、有界显示列表及 RGBA8 预览/分块 |
@@ -114,4 +127,4 @@ cargo run --offline --locked -- --pdf-inspect '.scratch\pdf-save-probe\<UUID>\pr
 
 ## 当前验证范围
 
-无窗口测试覆盖坐标数学，以及 MuPDF 的继承页面属性、有效 CropBox、旋转、UserUnit、位图尺寸和行布局、中文路径、文件句柄释放和错误处理；高清部分覆盖 800% 与 100/150/200% DPI 的可见分块选择、视图旋转、预算降档、LRU 淘汰、分块重叠与尺寸、任务替换及文档切换失效。保存部分覆盖笔迹和附件回读、原有内容和附件保留、名称树、重复导出、损坏和版本不支持的附件、外部修改失配及加密/签名拒绝。这些检查不判断渲染外观。多页部分增加混合尺寸与旋转布局、跨页定位与坐标、缩放锚点、逐页结果返回、跨页缓存隔离、底图 LRU 和过时结果过滤的无窗口检查。所有视觉、窗口和实际交互验收按 [AGENTS.md](AGENTS.md) 由用户执行；步骤与预期结果见 [多页阅读手动验收](docs/multipage-validation.zh-CN.md)、[画布手动验收](docs/canvas-validation.zh-CN.md)、[MuPDF 手动验收](docs/mupdf-validation.zh-CN.md) 和 [PDF 保存验收](docs/pdf-save-validation.zh-CN.md)。
+无窗口测试覆盖坐标数学，以及 MuPDF 的继承页面属性、有效 CropBox、旋转、UserUnit、位图尺寸和行布局、中文路径、文件句柄释放和错误处理；高清部分覆盖 800% 与 100/150/200% DPI 的可见分块选择、视图旋转、预算降档、LRU 淘汰、分块重叠与尺寸、任务替换及文档切换失效。保存部分覆盖笔迹和附件回读、原有内容和附件保留、名称树、重复导出、损坏和版本不支持的附件、外部修改失配及加密/签名拒绝。这些检查不判断渲染外观。多页部分增加混合尺寸与旋转布局、跨页定位与坐标、缩放锚点、逐页结果返回、跨页缓存隔离、底图 LRU 和过时结果过滤的无窗口检查。笔输入新增的无窗口检查覆盖输入归属、取消、相同时间戳、缺失压力及独立倾角属性、CBOR 向后兼容、固定压力鼠标、页面绑定及所有旋转/缩放/DPI 的坐标映射。所有视觉、窗口和实际交互验收按 [AGENTS.md](AGENTS.md) 由用户执行；步骤与预期结果见 [多页阅读手动验收](docs/multipage-validation.zh-CN.md)、[画布手动验收](docs/canvas-validation.zh-CN.md)、[MuPDF 手动验收](docs/mupdf-validation.zh-CN.md) 和 [PDF 保存验收](docs/pdf-save-validation.zh-CN.md)。

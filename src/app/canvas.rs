@@ -2,6 +2,7 @@
 
 mod area;
 mod document;
+mod ink_input;
 mod pdf_preview;
 mod scrollbars;
 mod status_bar;
@@ -13,6 +14,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use area::CanvasArea;
 use document::CanvasDocument;
+use ink_input::CanvasInput;
 use toolbar::ToolbarAction;
 use view::CanvasView;
 use winit::event_loop::EventLoopProxy;
@@ -25,6 +27,7 @@ pub(super) struct CanvasWorkspace {
     view: CanvasView,
     area: CanvasArea,
     document: CanvasDocument,
+    input: CanvasInput,
     open_requested: bool,
 }
 
@@ -34,16 +37,19 @@ impl CanvasWorkspace {
             view: CanvasView::default(),
             area: CanvasArea::default(),
             document: CanvasDocument::new(proxy)?,
+            input: CanvasInput::default(),
             open_requested: false,
         })
     }
 
     pub fn open_pdf(&mut self, path: PathBuf) {
+        self.input.cancel_drawing();
         self.document.open(path);
     }
 
     pub fn pdf_response(&mut self, response: PdfResponse) {
         if let Some(page) = self.document.receive(response) {
+            self.input.cancel_drawing();
             self.view = CanvasView::new(page);
             self.area = CanvasArea::default();
         }
@@ -54,9 +60,58 @@ impl CanvasWorkspace {
     }
 
     fn close_pdf(&mut self) {
+        self.input.cancel_drawing();
         self.document.close();
         self.view = CanvasView::default();
         self.area = CanvasArea::default();
+    }
+
+    pub fn cancel_input(&mut self) {
+        self.input.cancel();
+    }
+
+    pub fn pen_sample(&mut self, event: crate::platform::PenEvent) -> bool {
+        let (ui_owned, stroke) = self.input.pen(
+            event.sample,
+            &mut self.view,
+            self.document.can_ink(),
+            event.modifiers,
+        );
+        if let Some(stroke) = stroke {
+            self.document.add_stroke(stroke);
+        }
+        ui_owned
+    }
+
+    pub fn mouse_button(
+        &mut self,
+        down: bool,
+        position: Option<Point>,
+        modifiers: egui::Modifiers,
+    ) -> bool {
+        let (owned, stroke) = self.input.mouse_button(
+            down,
+            position,
+            &mut self.view,
+            self.document.can_ink(),
+            modifiers,
+        );
+        if let Some(stroke) = stroke {
+            self.document.add_stroke(stroke);
+        }
+        owned
+    }
+
+    pub fn mouse_move(&mut self, position: Point, modifiers: egui::Modifiers) {
+        if let Some(stroke) = self.input.mouse_move(position, &mut self.view, modifiers) {
+            self.document.add_stroke(stroke);
+        }
+    }
+
+    pub fn modifiers_changed(&mut self, modifiers: egui::Modifiers) {
+        if let Some(stroke) = self.input.modifiers_changed(modifiers, &mut self.view) {
+            self.document.add_stroke(stroke);
+        }
     }
 
     pub fn show(
@@ -85,9 +140,13 @@ impl CanvasWorkspace {
                 can_export_demo: self.document.can_export_demo(),
                 current_page: self.view.current_page(),
                 page_count: self.view.page_count(),
+                mouse_pen: self.input.mouse_pen,
             },
         );
         if process_input {
+            if action.is_some() {
+                self.input.cancel_drawing();
+            }
             match action {
                 Some(ToolbarAction::Open) => {
                     self.open_requested = true;
@@ -103,6 +162,10 @@ impl CanvasWorkspace {
                 }
                 Some(ToolbarAction::ExportDemo) => {
                     self.document.export_demo();
+                    action = None;
+                }
+                Some(ToolbarAction::MousePen) => {
+                    self.input.mouse_pen = !self.input.mouse_pen;
                     action = None;
                 }
                 _ => {}
@@ -131,7 +194,13 @@ impl CanvasWorkspace {
         };
         let scene = self
             .area
-            .show(ui, framebuffer, process_input, &mut self.view, view_action)
+            .show(
+                ui,
+                framebuffer,
+                process_input && !self.input.is_drawing(),
+                &mut self.view,
+                view_action,
+            )
             .map(|viewport| {
                 let mut scene = CanvasScene {
                     viewport,
@@ -139,6 +208,14 @@ impl CanvasWorkspace {
                 };
                 self.document
                     .update_scene(ui.ctx(), &mut scene, self.view.current_page());
+                if let Some(stroke) = self.input.active()
+                    && let Some(page) = scene
+                        .pages
+                        .iter_mut()
+                        .find(|page| page.index == stroke.page_index)
+                {
+                    page.active_stroke = Some(stroke);
+                }
                 scene
             });
 

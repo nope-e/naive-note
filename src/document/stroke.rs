@@ -36,6 +36,23 @@ pub struct RawSample {
     pub tilt_degrees: Option<[f64; 2]>,
     pub rotation_degrees: Option<f64>,
     pub phase: PenPhase,
+    /// Original device attributes, including independently missing tilt axes.
+    /// Absent in older version-1 attachments and synthetic samples.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<NativePenData>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NativePenData {
+    pub pointer_id: u32,
+    pub stroke_id: u64,
+    pub client_position_px: [f64; 2],
+    pub pressure_level: Option<i32>,
+    pub tilt_x_degrees: Option<f64>,
+    pub tilt_y_degrees: Option<f64>,
+    pub eraser: bool,
+    pub inverted: bool,
+    pub barrel_button: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -74,3 +91,6 @@ pub struct StrokeRecord {
     pub style: PenStyle,
     pub processing: ProcessingSnapshot,
 }
+
+#[cfg(test)]
+mod tests;

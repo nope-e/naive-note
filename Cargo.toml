@@ -25,6 +25,8 @@ skia-safe = { version = "=0.157.0", default-features = false, features = ["binar
 uuid = { version = "1.29.0", features = ["v4", "serde"] }
 winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }
 zstd = "0.14.3"
+tablet-input-windows = "=1.0.0"
+windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 # Skia's published Windows binaries use the release CRT. Match it in MuPDF,
 # including cargo test, while keeping our own Rust code in the debug profile.

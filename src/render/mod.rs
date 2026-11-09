@@ -28,10 +28,13 @@ pub struct CanvasScene {
 pub struct PageScene {
     pub index: u32,
     pub page: PageGeometry,
+    pub source_page: PageGeometry,
     pub view: ViewTransform,
     pub bitmap: Option<Arc<PageBitmap>>,
     pub tiles: Vec<Arc<PageTile>>,
     pub demo_stroke: Option<Arc<crate::document::StrokeRecord>>,
+    pub strokes: Vec<Arc<crate::document::StrokeRecord>>,
+    pub active_stroke: Option<Arc<crate::document::StrokeRecord>>,
     pub test_page: bool,
 }
 
@@ -54,6 +57,50 @@ impl Renderer {
 
     pub fn on_window_event(&mut self, window: &Window, event: &WindowEvent) -> bool {
         self.ui.state.on_window_event(window, event).repaint
+    }
+
+    /// Native pen contacts outside the canvas operate UI controls exactly once.
+    pub fn pen_ui_event(&mut self, event: crate::platform::PenEvent) {
+        use tablet_input_windows::PenPhase;
+        let crate::platform::PenEvent { sample, modifiers } = event;
+        if sample.phase == PenPhase::Cancel {
+            self.cancel_pen_ui();
+            return;
+        }
+        let scale = self.ui.context.pixels_per_point();
+        let pos = egui::pos2(
+            sample.position[0] as f32 / scale,
+            sample.position[1] as f32 / scale,
+        );
+        let input = self.ui.state.egui_input_mut();
+        input.events.push(egui::Event::ModifiersChanged(modifiers));
+        if sample.phase == PenPhase::Leave {
+            input.events.push(egui::Event::PointerGone);
+            return;
+        }
+        input.events.push(egui::Event::PointerMoved(pos));
+        if matches!(sample.phase, PenPhase::Down | PenPhase::Up) {
+            input.events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: sample.phase == PenPhase::Down,
+                modifiers,
+            });
+        }
+    }
+
+    pub fn cancel_pen_ui(&mut self) {
+        let modifiers = self.ui.context.input(|input| input.modifiers);
+        let input = self.ui.state.egui_input_mut();
+        let pos = egui::pos2(-1e6, -1e6);
+        input.events.push(egui::Event::PointerMoved(pos));
+        input.events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers,
+        });
+        input.events.push(egui::Event::PointerGone);
     }
 
     fn resize(&mut self, window: &GlWindow) -> Result<()> {

@@ -12,6 +12,7 @@ pub(super) enum ToolbarAction {
     Close,
     DemoStroke,
     ExportDemo,
+    MousePen,
     View(ViewAction),
 }
 
@@ -21,6 +22,7 @@ pub(super) struct DocumentActions {
     pub can_export_demo: bool,
     pub current_page: u32,
     pub page_count: u32,
+    pub mouse_pen: bool,
 }
 
 pub(super) fn show(
@@ -74,6 +76,13 @@ pub(super) fn show(
                 action = Some(ToolbarAction::Close);
             }
             ui.separator();
+            if ui.selectable_label(document.mouse_pen, "Mouse pen")
+                .on_hover_text("Fixed-pressure mouse drawing; turn off for left-drag pan. Session ink is not saved yet.")
+                .clicked()
+            {
+                action = Some(ToolbarAction::MousePen);
+            }
+            ui.separator();
             if ui
                 .add_enabled(document.can_demo, egui::Button::new("Pressure demo"))
                 .on_hover_text("Toggle one simulated pressure stroke")
@@ -87,7 +96,7 @@ pub(super) fn show(
                     egui::Button::new("Export test PDF"),
                 )
                 .on_hover_text(
-                    "Save a verified copy in the project's .scratch folder and reopen it",
+                    "Export only the simulated demo, then reopen the copy. Unavailable while unsaved session ink exists.",
                 )
                 .clicked()
             {
@@ -149,7 +158,12 @@ pub(super) fn show(
                 action = Some(ToolbarAction::View(ViewAction::Rotate));
             }
             ui.separator();
-            ui.label("Wheel: scroll | Ctrl+wheel: zoom | Left/middle drag: pan");
+            ui.label(if document.mouse_pen {
+                "Pen/left: write | Middle: pan | Wheel: scroll | Ctrl+wheel: zoom"
+            } else {
+                "Pen: write | Left/middle: pan | Wheel: scroll | Ctrl+wheel: zoom"
+            });
+            ui.label("Ctrl+pen/left drag: zoom | Alt+pen/left drag: pan");
         });
         if show_renderer_info {
             renderer_info(ui, page, viewport, fps);

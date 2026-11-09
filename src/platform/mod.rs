@@ -1,5 +1,8 @@
 //! Native window and OpenGL context ownership. All access stays on the UI thread.
 
+mod pen;
+pub use pen::{PenEvent, PenInput};
+
 use std::{ffi::CStr, num::NonZeroU32, sync::Arc};
 
 use anyhow::{Context, Result, anyhow};

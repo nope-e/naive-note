@@ -1,11 +1,19 @@
-//! Deterministic pressure fixture. Real pen input/modeling comes in later stages.
+//! Direct pressure strokes and a deterministic PDF appearance fixture.
+
+mod direct;
+mod outline;
+mod target;
+
+pub use direct::DirectStroke;
+use outline::round_outline;
+pub use target::StrokeTarget;
 
 use anyhow::{Result, ensure};
 use uuid::Uuid;
 
 use crate::document::{
-    ModeledSample, PageGeometry, PathCommand, PenPhase, PenStyle, Point, ProcessingSnapshot,
-    RawSample, StrokeRecord,
+    ModeledSample, PageGeometry, PenPhase, PenStyle, Point, ProcessingSnapshot, RawSample,
+    StrokeRecord,
 };
 
 pub fn demo_stroke(page: PageGeometry) -> Result<StrokeRecord> {
@@ -32,6 +40,7 @@ pub fn demo_stroke(page: PageGeometry) -> Result<StrokeRecord> {
                 pressure: Some(0.04 + 0.96 * (t * std::f64::consts::PI).sin().powi(2)),
                 tilt_degrees: Some([0.0, 0.0]),
                 rotation_degrees: Some(0.0),
+                native: None,
                 phase: match i {
                     0 => PenPhase::Down,
                     96 => PenPhase::Up,
@@ -64,69 +73,10 @@ pub fn demo_stroke(page: PageGeometry) -> Result<StrokeRecord> {
     })
 }
 
-// Round disks and connecting trapezoids use the same winding. Nonzero filling
-// combines them without seams and handles coincident samples without division.
-fn round_outline(samples: &[ModeledSample], style: &PenStyle) -> Vec<PathCommand> {
-    let mut path = Vec::new();
-    for pair in samples.windows(2) {
-        let (a, b) = (&pair[0], &pair[1]);
-        let dx = b.position.x - a.position.x;
-        let dy = b.position.y - a.position.y;
-        let length = dx.hypot(dy);
-        if length <= f64::EPSILON {
-            continue;
-        }
-        let offset = |sample: &ModeledSample, sign: f64| {
-            let radius = style.width(sample.pressure) * 0.5;
-            Point::new(
-                sample.position.x - sign * dy / length * radius,
-                sample.position.y + sign * dx / length * radius,
-            )
-        };
-        path.extend([
-            PathCommand::MoveTo(offset(a, -1.0)),
-            PathCommand::LineTo(offset(b, -1.0)),
-            PathCommand::LineTo(offset(b, 1.0)),
-            PathCommand::LineTo(offset(a, 1.0)),
-            PathCommand::Close,
-        ]);
-    }
-    for sample in samples {
-        let p = sample.position;
-        let r = style.width(sample.pressure) * 0.5;
-        let k = r * 0.552_284_749_830_793_6;
-        path.extend([
-            PathCommand::MoveTo(Point::new(p.x + r, p.y)),
-            PathCommand::CubicTo {
-                control1: Point::new(p.x + r, p.y + k),
-                control2: Point::new(p.x + k, p.y + r),
-                to: Point::new(p.x, p.y + r),
-            },
-            PathCommand::CubicTo {
-                control1: Point::new(p.x - k, p.y + r),
-                control2: Point::new(p.x - r, p.y + k),
-                to: Point::new(p.x - r, p.y),
-            },
-            PathCommand::CubicTo {
-                control1: Point::new(p.x - r, p.y - k),
-                control2: Point::new(p.x - k, p.y - r),
-                to: Point::new(p.x, p.y - r),
-            },
-            PathCommand::CubicTo {
-                control1: Point::new(p.x + k, p.y - r),
-                control2: Point::new(p.x + r, p.y - k),
-                to: Point::new(p.x + r, p.y),
-            },
-            PathCommand::Close,
-        ]);
-    }
-    path
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{Rect, Rotation};
+    use crate::document::{PathCommand, Rect, Rotation};
 
     #[test]
     fn pressure_fixture_is_bounded_and_wider_in_the_middle() {
