@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn old_processing_snapshots_decode_without_modeler_parameters() {
+    #[derive(serde::Serialize)]
+    struct LegacyProcessing {
+        algorithm: String,
+        version: u32,
+        coordinate_unit: String,
+    }
+    let legacy = LegacyProcessing {
+        algorithm: "direct-round-outline".to_owned(),
+        version: 1,
+        coordinate_unit: "paper-pt-top-left".to_owned(),
+    };
+    let mut bytes = Vec::new();
+    ciborium::into_writer(&legacy, &mut bytes).unwrap();
+    let decoded: ProcessingSnapshot = ciborium::from_reader(bytes.as_slice()).unwrap();
+    assert_eq!(decoded.algorithm, legacy.algorithm);
+    assert_eq!(decoded.modeler, None);
+}
+
+#[test]
 fn old_version_one_raw_samples_without_native_attributes_still_decode() {
     #[derive(serde::Serialize)]
     struct LegacySample {

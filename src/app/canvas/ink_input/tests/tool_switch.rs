@@ -11,7 +11,7 @@ fn changing_modifiers_mid_stroke_finishes_ink_once_and_never_rejoins_after_relea
         egui::Modifiers::NONE,
     );
     assert!(input.is_drawing());
-    let expected = input.active().unwrap();
+    let expected = input.active().unwrap().record;
     let before = view.transform;
     let completed = input
         .modifiers_changed(egui::Modifiers::CTRL, &mut view)
@@ -114,7 +114,7 @@ fn pen_sample_tool_switch_finishes_existing_ink_for_both_move_and_up() {
                 true,
                 egui::Modifiers::NONE,
             );
-            let expected = input.active().unwrap();
+            let expected = input.active().unwrap().record;
             let before = view.transform;
             // The key snapshot can arrive with a sample before ModifiersChanged.
             let navigation_point = Point::new(endpoint.x + 50.0, endpoint.y - 60.0);

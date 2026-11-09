@@ -6,7 +6,7 @@ use tablet_input_windows::{PenPhase, PenSample};
 
 use crate::{
     document::{Point, StrokeRecord},
-    ink::DirectStroke,
+    ink::LiveStroke,
 };
 
 use super::{CanvasInput, CanvasView};
@@ -42,7 +42,7 @@ impl CanvasInput {
                 && !sample.inverted
                 && let Some(target) = view.stroke_target(position)
             {
-                let mut stroke = DirectStroke::new(target);
+                let mut stroke = LiveStroke::new(target, self.smoothing);
                 stroke.push_pen(sample);
                 self.active = Some(stroke);
             }

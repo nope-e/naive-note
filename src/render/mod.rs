@@ -34,7 +34,7 @@ pub struct PageScene {
     pub tiles: Vec<Arc<PageTile>>,
     pub demo_stroke: Option<Arc<crate::document::StrokeRecord>>,
     pub strokes: Vec<Arc<crate::document::StrokeRecord>>,
-    pub active_stroke: Option<Arc<crate::document::StrokeRecord>>,
+    pub active_stroke: Option<crate::ink::ActiveInk>,
     pub test_page: bool,
 }
 

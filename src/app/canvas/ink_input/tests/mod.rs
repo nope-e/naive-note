@@ -1,3 +1,4 @@
+mod modeling;
 mod mouse;
 mod navigation;
 mod ownership;
@@ -17,7 +18,12 @@ fn setup() -> (CanvasInput, CanvasView, Point) {
         CanvasViewport::new(Rect::new(0.0, 40.0, 800.0, 640.0), 1.5, (1200, 960)).unwrap();
     view.update_viewport(viewport);
     let position = viewport.logical_to_physical(viewport.logical.center());
-    (CanvasInput::default(), view, position)
+    // Existing routing/coordinate tests exercise the unchanged Direct mode.
+    let input = CanvasInput {
+        smoothing: false,
+        ..Default::default()
+    };
+    (input, view, position)
 }
 
 fn sample(phase: PenPhase, position: Point) -> PenSample {

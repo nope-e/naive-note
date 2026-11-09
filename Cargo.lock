@@ -1069,6 +1069,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ink-stroke-modeler-rs"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd1c3066d5abcd42e8fcfd14f76e5397b373e202b3fdf7628d269b05b889bdd6"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1360,6 +1369,7 @@ dependencies = [
  "env_logger",
  "glutin",
  "glutin-winit",
+ "ink-stroke-modeler-rs",
  "log",
  "mupdf",
  "raw-window-handle",

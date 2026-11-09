@@ -67,6 +67,23 @@ pub struct ProcessingSnapshot {
     pub algorithm: String,
     pub version: u32,
     pub coordinate_unit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modeler: Option<ModelerPreset>,
+}
+
+/// Parameters in paper points and seconds, captured once at stroke start.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelerPreset {
+    pub wobble_smoother_timeout: f64,
+    pub wobble_smoother_speed_floor: f64,
+    pub wobble_smoother_speed_ceiling: f64,
+    pub position_modeler_spring_mass_constant: f64,
+    pub position_modeler_drag_constant: f64,
+    pub sampling_min_output_rate: f64,
+    pub sampling_end_of_stroke_stopping_distance: f64,
+    pub sampling_end_of_stroke_max_iterations: usize,
+    pub sampling_max_outputs_per_call: usize,
+    pub stylus_state_modeler_max_input_samples: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::{
     document::{PenPhase as StrokePhase, Point, StrokeRecord},
-    ink::DirectStroke,
+    ink::LiveStroke,
 };
 
 use super::{CanvasInput, CanvasView};
@@ -40,7 +40,7 @@ impl CanvasInput {
             let Some(target) = view.stroke_target(position) else {
                 return (false, None);
             };
-            let mut stroke = DirectStroke::new(target);
+            let mut stroke = LiveStroke::new(target, self.smoothing);
             stroke.push_mouse(position, self.time_us(), StrokePhase::Down);
             self.active = Some(stroke);
             self.mouse_active = true;

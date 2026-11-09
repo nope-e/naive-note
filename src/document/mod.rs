@@ -8,7 +8,7 @@ mod view;
 pub use geometry::{PageGeometry, Point, Rect, Rotation, Size};
 pub use layout::PageLayout;
 pub use stroke::{
-    ModeledSample, NativePenData, PathCommand, PenPhase, PenStyle, ProcessingSnapshot, RawSample,
-    StrokeRecord,
+    ModeledSample, ModelerPreset, NativePenData, PathCommand, PenPhase, PenStyle,
+    ProcessingSnapshot, RawSample, StrokeRecord,
 };
 pub use view::{CanvasViewport, ViewTransform};

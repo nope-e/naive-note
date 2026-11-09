@@ -134,7 +134,7 @@ fn mouse_tool_switch_commits_ink_from_keyboard_move_or_release_once() {
                     .mouse_move(endpoint, &mut view, egui::Modifiers::NONE)
                     .is_none()
             );
-            let expected = input.active().unwrap();
+            let expected = input.active().unwrap().record;
             let completed = match trigger {
                 0 => input.modifiers_changed(modifiers, &mut view),
                 1 => input.mouse_move(

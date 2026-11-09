@@ -14,6 +14,7 @@
 | `uuid` 文档与笔迹标识 | [uuid 1.29.0](https://github.com/uuid-rs/uuid) | MIT OR Apache-2.0 |
 | `sha2` 批注指纹 | [sha2 0.11.1](https://github.com/RustCrypto/hashes) | MIT OR Apache-2.0 |
 | `tablet-input-windows` 原生笔输入 | [crates.io 1.0.0](https://crates.io/crates/tablet-input-windows/1.0.0)，Cargo.lock 锁定包校验和 | [MIT](licenses/tablet-input-windows-MIT.txt) |
+| `ink-stroke-modeler-rs` 笔迹建模 | [crates.io 0.1.0](https://crates.io/crates/ink-stroke-modeler-rs/0.1.0)，Cargo.lock 锁定包校验和 | [MIT](licenses/ink-stroke-modeler-rs-MIT.txt) OR [Apache-2.0](licenses/ink-stroke-modeler-rs-Apache-2.0.txt) |
 | `windows` Win32 绑定 | [windows-rs 0.62.2](https://github.com/microsoft/windows-rs) | MIT OR Apache-2.0 |
 
 AGPL 全文见 [licenses/MuPDF-AGPL-3.0.txt](licenses/MuPDF-AGPL-3.0.txt)。接入 MuPDF 没有替项目自动选择或更改根许可证；发布版本需要落实适用许可、完整第三方声明及对应源码的提供方式。MuPDF 包中的第三方库另有各自许可，制作发行包时需从锁定版本的 `mupdf-sys/mupdf` 源码一并汇总。

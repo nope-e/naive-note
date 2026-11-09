@@ -1,11 +1,12 @@
-//! Direct pressure strokes and a deterministic PDF appearance fixture.
+//! Runtime-selectable stroke modeling and a deterministic PDF appearance fixture.
 
-mod direct;
+mod modeler;
 mod outline;
+mod stroke;
 mod target;
 
-pub use direct::DirectStroke;
 use outline::round_outline;
+pub use stroke::{ActiveInk, LiveStroke};
 pub use target::StrokeTarget;
 
 use anyhow::{Result, ensure};
@@ -69,6 +70,7 @@ pub fn demo_stroke(page: PageGeometry) -> Result<StrokeRecord> {
             algorithm: "simulated-direct-round-outline".to_owned(),
             version: 1,
             coordinate_unit: "paper-pt-top-left".to_owned(),
+            modeler: None,
         },
     })
 }

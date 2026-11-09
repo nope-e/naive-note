@@ -13,6 +13,7 @@ pub(super) enum ToolbarAction {
     DemoStroke,
     ExportDemo,
     MousePen,
+    Smoothing,
     View(ViewAction),
 }
 
@@ -23,6 +24,7 @@ pub(super) struct DocumentActions {
     pub current_page: u32,
     pub page_count: u32,
     pub mouse_pen: bool,
+    pub smoothing: bool,
 }
 
 pub(super) fn show(
@@ -81,6 +83,12 @@ pub(super) fn show(
                 .clicked()
             {
                 action = Some(ToolbarAction::MousePen);
+            }
+            if ui.selectable_label(document.smoothing, "Smoothing")
+                .on_hover_text("Smooth pen and mouse strokes. Changes apply to the next stroke.")
+                .clicked()
+            {
+                action = Some(ToolbarAction::Smoothing);
             }
             ui.separator();
             if ui

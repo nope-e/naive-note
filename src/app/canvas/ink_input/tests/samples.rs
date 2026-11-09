@@ -90,7 +90,7 @@ fn page_and_down_transform_remain_bound_outside_the_page() {
         true,
         egui::Modifiers::NONE,
     );
-    let snapshot = input.active().unwrap();
+    let snapshot = input.active().unwrap().record;
     // Simulate a later navigation change: mapping must still use Down's view.
     view.transform.pan(Point::new(200.0, -900.0));
     let outside = Point::new(position.x + 900.0, position.y + 1500.0);

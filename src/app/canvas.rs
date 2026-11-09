@@ -141,10 +141,11 @@ impl CanvasWorkspace {
                 current_page: self.view.current_page(),
                 page_count: self.view.page_count(),
                 mouse_pen: self.input.mouse_pen,
+                smoothing: self.input.smoothing,
             },
         );
         if process_input {
-            if action.is_some() {
+            if action.is_some() && !matches!(action, Some(ToolbarAction::Smoothing)) {
                 self.input.cancel_drawing();
             }
             match action {
@@ -166,6 +167,10 @@ impl CanvasWorkspace {
                 }
                 Some(ToolbarAction::MousePen) => {
                     self.input.mouse_pen = !self.input.mouse_pen;
+                    action = None;
+                }
+                Some(ToolbarAction::Smoothing) => {
+                    self.input.smoothing = !self.input.smoothing;
                     action = None;
                 }
                 _ => {}
@@ -212,7 +217,7 @@ impl CanvasWorkspace {
                     && let Some(page) = scene
                         .pages
                         .iter_mut()
-                        .find(|page| page.index == stroke.page_index)
+                        .find(|page| page.index == stroke.record.page_index)
                 {
                     page.active_stroke = Some(stroke);
                 }

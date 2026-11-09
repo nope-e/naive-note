@@ -5,7 +5,7 @@ use skia_safe::{
 };
 
 use super::{PageScene, test_page};
-use crate::document::{CanvasViewport, PathCommand, Point, StrokeRecord};
+use crate::document::{CanvasViewport, PathCommand, PenStyle, Point, StrokeRecord};
 
 pub(super) fn draw(
     canvas: &Canvas,
@@ -109,13 +109,12 @@ pub(super) fn draw(
     } else if scene.test_page {
         test_page::draw_contents(canvas, scene.source_page);
     }
-    for stroke in scene
-        .strokes
-        .iter()
-        .chain(scene.demo_stroke.iter())
-        .chain(scene.active_stroke.iter())
-    {
+    for stroke in scene.strokes.iter().chain(scene.demo_stroke.iter()) {
         draw_stroke(canvas, stroke);
+    }
+    if let Some(active) = &scene.active_stroke {
+        draw_stroke(canvas, &active.record);
+        draw_outline(canvas, &active.predicted_outline, &active.record.style);
     }
     canvas.restore();
 
@@ -128,9 +127,13 @@ pub(super) fn draw(
 }
 
 fn draw_stroke(canvas: &Canvas, stroke: &StrokeRecord) {
+    draw_outline(canvas, &stroke.outline, &stroke.style);
+}
+
+fn draw_outline(canvas: &Canvas, outline: &[PathCommand], style: &PenStyle) {
     let mut builder = skia_safe::PathBuilder::new();
     let point = |p: Point| skia_safe::Point::new(p.x as f32, p.y as f32);
-    for command in &stroke.outline {
+    for command in outline {
         match *command {
             PathCommand::MoveTo(p) => {
                 builder.move_to(point(p));
@@ -151,7 +154,7 @@ fn draw_stroke(canvas: &Canvas, stroke: &StrokeRecord) {
         }
     }
     let mut paint = Paint::default();
-    let [r, g, b] = stroke.style.color_rgb;
+    let [r, g, b] = style.color_rgb;
     paint
         .set_anti_alias(true)
         .set_color(Color::from_rgb(r, g, b));
