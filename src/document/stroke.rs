@@ -13,6 +13,17 @@ pub struct PenStyle {
     pub pressure_gamma: f64,
 }
 
+impl Default for PenStyle {
+    fn default() -> Self {
+        Self {
+            color_rgb: [25, 105, 190],
+            max_width_pt: 2.0,
+            min_width_ratio: 0.2,
+            pressure_gamma: 1.0,
+        }
+    }
+}
+
 impl PenStyle {
     pub fn width(&self, pressure: f64) -> f64 {
         self.max_width_pt

@@ -80,14 +80,13 @@ impl Scrollbars {
                     self.grab_offsets[d] = None;
                 }
             }
-            let visuals = ui.style().interact(&response);
+            let color = if response.hovered() || active {
+                crate::app::theme::MUTED
+            } else {
+                crate::app::theme::BORDER
+            };
             ui.painter()
-                .rect_filled(track, 0.0, ui.visuals().extreme_bg_color);
-            ui.painter().rect_filled(
-                handle_rect(offsets[d].unwrap_or(axis.offset)),
-                3.0,
-                visuals.fg_stroke.color.gamma_multiply(0.6),
-            );
+                .rect_filled(handle_rect(offsets[d].unwrap_or(axis.offset)), 3.0, color);
             response.on_hover_cursor(egui::CursorIcon::Default);
         }
         offsets

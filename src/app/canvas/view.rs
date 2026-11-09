@@ -50,6 +50,13 @@ impl Default for CanvasView {
 }
 
 impl CanvasView {
+    pub fn draft() -> Self {
+        Self {
+            fit_to_page: false,
+            ..Self::default()
+        }
+    }
+
     pub fn new(pages: Vec<PageGeometry>) -> Self {
         Self {
             layout: PageLayout::new(&pages),
@@ -110,10 +117,12 @@ impl CanvasView {
 
     pub fn update_viewport(&mut self, viewport: CanvasViewport) {
         if self.viewport.map(|old| old.logical) != Some(viewport.logical) {
-            if self.fit_to_page || self.fit_width || self.viewport.is_none() {
+            if self.fit_to_page || self.fit_width {
                 self.fit(viewport.logical);
             } else if let Some(old) = self.viewport {
                 self.transform.reframe(old.logical, viewport.logical);
+            } else {
+                self.position_page(viewport.logical, false);
             }
         }
         self.viewport = Some(viewport);

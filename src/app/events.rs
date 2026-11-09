@@ -103,6 +103,10 @@ impl ApplicationHandler<UserEvent> for Application {
                     self.fail(event_loop, error);
                     return;
                 }
+                if runtime.close_requested {
+                    event_loop.exit();
+                    return;
+                }
             }
             _ => {}
         }

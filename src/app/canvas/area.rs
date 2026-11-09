@@ -48,7 +48,7 @@ impl CanvasArea {
                     .min(outer.width() * 0.5)
                     .min(outer.height() * 0.5);
                 let rect = egui::Rect::from_min_max(
-                    outer.min,
+                    outer.min + egui::vec2(0.0, 54.0_f32.min(outer.height() * 0.25)),
                     outer.max - egui::vec2(thickness, thickness),
                 );
                 let response = ui.interact(

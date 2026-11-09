@@ -121,8 +121,14 @@ pub(super) fn draw(
     paint
         .set_style(Style::Stroke)
         .set_stroke_width(1.0 / scale)
-        .set_color(Color::from_rgb(0xA6, 0xAF, 0xAD));
+        .set_color(Color::from_rgb(0xD9, 0xDC, 0xE2));
     canvas.draw_rect(paper, &paint);
+    if scene.test_page {
+        paint.set_color(Color::from_rgb(0x38, 0xA0, 0x73));
+        let r = 5.0 / scale;
+        canvas.draw_line((-r, -r), (r, r), &paint);
+        canvas.draw_line((-r, r), (r, -r), &paint);
+    }
     canvas.restore();
 }
 

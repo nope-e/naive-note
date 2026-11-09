@@ -1,11 +1,11 @@
-//! Ctrl/Alt navigation and transitions from an ink stroke to a view gesture.
+//! Selected-tool and Ctrl/Alt navigation, including transitions from ink.
 
 use std::sync::Arc;
 
 use crate::document::{Point, StrokeRecord};
 
 use super::super::area::{CanvasResponse, ZoomGesture};
-use super::{CanvasInput, CanvasView};
+use super::{CanvasInput, CanvasTool, CanvasView};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum NavigationMode {
@@ -20,10 +20,10 @@ pub(super) struct Navigation {
     viewport: crate::document::CanvasViewport,
 }
 
-fn navigation_mode(modifiers: egui::Modifiers) -> Option<NavigationMode> {
+fn navigation_mode(modifiers: egui::Modifiers, tool: CanvasTool) -> Option<NavigationMode> {
     if modifiers.ctrl {
         Some(NavigationMode::Zoom)
-    } else if modifiers.alt {
+    } else if modifiers.alt || tool == CanvasTool::Pan {
         Some(NavigationMode::Pan)
     } else {
         None
@@ -52,7 +52,7 @@ impl CanvasInput {
         view: &CanvasView,
         modifiers: egui::Modifiers,
     ) -> bool {
-        let Some(mode) = navigation_mode(modifiers) else {
+        let Some(mode) = navigation_mode(modifiers, self.tool) else {
             return false;
         };
         let Some(viewport) = view.viewport else {
@@ -79,7 +79,7 @@ impl CanvasInput {
         }
         let nav = self.navigation.as_mut().unwrap();
         let logical = nav.viewport.physical_to_logical(position);
-        let mode = navigation_mode(modifiers);
+        let mode = navigation_mode(modifiers, self.tool);
         let delta = Point::new(logical.x - nav.previous.x, logical.y - nav.previous.y);
         nav.previous = logical;
         if nav.mode != mode {

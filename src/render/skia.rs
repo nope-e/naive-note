@@ -131,7 +131,12 @@ impl SkiaRenderer {
         // egui changed GL state in the previous frame. Invalidate Ganesh's cached state.
         self.context.reset(None);
         let canvas = surface.canvas();
-        canvas.clear(Color::from_rgb(0xE7, 0xEC, 0xEA));
+        let background = crate::app::theme::WORKSPACE;
+        canvas.clear(Color::from_rgb(
+            background.r(),
+            background.g(),
+            background.b(),
+        ));
         if let Some(scene) = scene {
             for page in &scene.pages {
                 let tile_images: Vec<_> = page

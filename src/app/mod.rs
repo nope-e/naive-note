@@ -5,6 +5,8 @@ mod events;
 mod frame_rate;
 mod frame_scheduler;
 mod runtime;
+pub(crate) mod theme;
+mod window_frame;
 
 use std::time::Instant;
 

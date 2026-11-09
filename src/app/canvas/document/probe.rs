@@ -32,7 +32,7 @@ impl CanvasDocument {
                             .to_owned(),
                     );
                 }
-                Err(error) => self.message = Some(format!("{error:#}")),
+                Err(error) => self.set_error(format!("模拟笔迹失败：{error:#}")),
             }
         } else {
             self.message = Some("Demo overlay removed".to_owned());
@@ -43,6 +43,7 @@ impl CanvasDocument {
         if !self.can_export_demo() {
             return;
         }
+        self.notice = None;
         let stroke = Arc::clone(self.loaded.as_ref().unwrap().demo_stroke.as_ref().unwrap());
         let document = self.loaded_request.unwrap();
         match self.worker.export_probe(document, stroke) {
@@ -52,7 +53,7 @@ impl CanvasDocument {
                     "Saving and verifying a test copy in .scratch/pdf-save-probe/...".to_owned(),
                 );
             }
-            Err(error) => self.message = Some(format!("{error:#}")),
+            Err(error) => self.set_error(format!("测试导出失败：{error:#}")),
         }
     }
 }

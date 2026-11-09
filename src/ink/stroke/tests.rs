@@ -13,6 +13,7 @@ fn stroke(smoothing: bool) -> LiveStroke {
                 .unwrap(),
         },
         smoothing,
+        PenStyle::default(),
     )
 }
 

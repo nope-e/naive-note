@@ -15,7 +15,7 @@ use anyhow::Result;
 use area::CanvasArea;
 use document::CanvasDocument;
 use ink_input::CanvasInput;
-use toolbar::ToolbarAction;
+use toolbar::{ToolbarAction, WorkspaceToolbar};
 use view::CanvasView;
 use winit::event_loop::EventLoopProxy;
 
@@ -28,16 +28,18 @@ pub(super) struct CanvasWorkspace {
     area: CanvasArea,
     document: CanvasDocument,
     input: CanvasInput,
+    toolbar: WorkspaceToolbar,
     open_requested: bool,
 }
 
 impl CanvasWorkspace {
     pub fn new(proxy: EventLoopProxy<UserEvent>) -> Result<Self> {
         Ok(Self {
-            view: CanvasView::default(),
+            view: CanvasView::draft(),
             area: CanvasArea::default(),
             document: CanvasDocument::new(proxy)?,
-            input: CanvasInput::default(),
+            input: CanvasInput::for_editor(),
+            toolbar: WorkspaceToolbar::default(),
             open_requested: false,
         })
     }
@@ -62,7 +64,7 @@ impl CanvasWorkspace {
     fn close_pdf(&mut self) {
         self.input.cancel_drawing();
         self.document.close();
-        self.view = CanvasView::default();
+        self.view = CanvasView::draft();
         self.area = CanvasArea::default();
     }
 
@@ -70,7 +72,8 @@ impl CanvasWorkspace {
         self.input.cancel();
     }
 
-    pub fn pen_sample(&mut self, event: crate::platform::PenEvent) -> bool {
+    pub fn pen_sample(&mut self, event: crate::platform::PenEvent, over_ui: bool) -> bool {
+        self.input.ui_blocked = over_ui;
         let (ui_owned, stroke) = self.input.pen(
             event.sample,
             &mut self.view,
@@ -88,7 +91,9 @@ impl CanvasWorkspace {
         down: bool,
         position: Option<Point>,
         modifiers: egui::Modifiers,
+        over_ui: bool,
     ) -> bool {
+        self.input.ui_blocked = over_ui;
         let (owned, stroke) = self.input.mouse_button(
             down,
             position,
@@ -127,25 +132,46 @@ impl CanvasWorkspace {
             self.view.current_page(),
             self.view.page(),
         );
-        let mut action = toolbar::show(
+        let title = self.document.title();
+        let subtitle = self.document.subtitle();
+        let mut action = self.toolbar.show(
             ui,
-            self.view.transform.zoom(),
-            self.view.page(),
-            self.view.viewport,
-            show_renderer_info,
-            fps,
-            toolbar::DocumentActions {
-                can_close: self.document.can_close(),
-                can_demo: self.document.can_demo(),
-                can_export_demo: self.document.can_export_demo(),
-                current_page: self.view.current_page(),
-                page_count: self.view.page_count(),
-                mouse_pen: self.input.mouse_pen,
-                smoothing: self.input.smoothing,
+            &toolbar::ToolbarContext {
+                title: &title,
+                subtitle: &subtitle,
+                notice: self.document.notice(),
+                zoom: self.view.transform.zoom(),
+                bottom_inset: if show_renderer_info { 140.0 } else { 0.0 },
+                style: &self.input.style,
+                document: toolbar::DocumentActions {
+                    can_close: self.document.can_close(),
+                    can_demo: self.document.can_demo(),
+                    can_export_demo: self.document.can_export_demo(),
+                    current_page: self.view.current_page(),
+                    page_count: self.view.page_count(),
+                    tool: self.input.tool,
+                    mouse_pen: self.input.mouse_pen,
+                    smoothing: self.input.smoothing,
+                },
             },
+            process_input,
         );
         if process_input {
-            if action.is_some() && !matches!(action, Some(ToolbarAction::Smoothing)) {
+            if action.is_some() {
+                ui.ctx().request_repaint();
+            }
+            if action.is_some()
+                && !matches!(
+                    action,
+                    Some(
+                        ToolbarAction::Smoothing
+                            | ToolbarAction::Color(_)
+                            | ToolbarAction::Width(_)
+                            | ToolbarAction::PressureGamma(_)
+                            | ToolbarAction::DismissNotice
+                    )
+                )
+            {
                 self.input.cancel_drawing();
             }
             match action {
@@ -165,12 +191,32 @@ impl CanvasWorkspace {
                     self.document.export_demo();
                     action = None;
                 }
+                Some(ToolbarAction::Tool(tool)) => {
+                    self.input.tool = tool;
+                    action = None;
+                }
                 Some(ToolbarAction::MousePen) => {
                     self.input.mouse_pen = !self.input.mouse_pen;
                     action = None;
                 }
                 Some(ToolbarAction::Smoothing) => {
                     self.input.smoothing = !self.input.smoothing;
+                    action = None;
+                }
+                Some(ToolbarAction::Color(color)) => {
+                    self.input.style.color_rgb = color;
+                    action = None;
+                }
+                Some(ToolbarAction::Width(width)) => {
+                    self.input.style.max_width_pt = width;
+                    action = None;
+                }
+                Some(ToolbarAction::PressureGamma(gamma)) => {
+                    self.input.style.pressure_gamma = gamma;
+                    action = None;
+                }
+                Some(ToolbarAction::DismissNotice) => {
+                    self.document.dismiss_notice();
                     action = None;
                 }
                 _ => {}
@@ -183,15 +229,18 @@ impl CanvasWorkspace {
                 self.view
                     .pointer_coordinates(Point::new(f64::from(pointer.x), f64::from(pointer.y)))
             });
-        status_bar::show(
-            ui,
-            self.view.page(),
-            self.view.transform.zoom(),
-            self.view.fit_to_page,
-            pointer,
-            &document_label,
-            self.document.message(),
-        );
+        if show_renderer_info {
+            toolbar::renderer_info(ui, self.view.page(), self.view.viewport, fps);
+            status_bar::show(
+                ui,
+                self.view.page(),
+                self.view.transform.zoom(),
+                self.view.fit_to_page,
+                pointer,
+                &document_label,
+                self.document.message(),
+            );
+        }
 
         let view_action = match action {
             Some(ToolbarAction::View(action)) => Some(action),

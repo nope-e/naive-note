@@ -3,7 +3,9 @@ mod mouse;
 mod navigation;
 mod ownership;
 mod samples;
+mod selected_tool;
 mod tool_switch;
+mod ui;
 
 use super::{CanvasInput, CanvasView};
 use crate::document::{CanvasViewport, PageGeometry, Point, Rect, Rotation, StrokeRecord};

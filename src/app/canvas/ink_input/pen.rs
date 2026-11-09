@@ -28,21 +28,23 @@ impl CanvasInput {
             if self.contact.is_some() || self.mouse_active {
                 return (false, None);
             }
-            let in_canvas = view
-                .viewport
-                .is_some_and(|v| v.logical.contains(v.physical_to_logical(position)));
+            let in_canvas = !self.ui_blocked
+                && view
+                    .viewport
+                    .is_some_and(|v| v.logical.contains(v.physical_to_logical(position)));
             let ui_owned = !in_canvas;
             self.contact = Some((sample.pointer_id, id, ui_owned));
             self.last_position = Some(position);
             if !ui_owned && self.begin_navigation(position, view, modifiers) {
                 return (false, None);
             }
-            if enabled
+            if !ui_owned
+                && enabled
                 && !sample.eraser
                 && !sample.inverted
                 && let Some(target) = view.stroke_target(position)
             {
-                let mut stroke = LiveStroke::new(target, self.smoothing);
+                let mut stroke = LiveStroke::new(target, self.smoothing, self.style.clone());
                 stroke.push_pen(sample);
                 self.active = Some(stroke);
             }

@@ -22,6 +22,7 @@ pub(super) struct Runtime {
     pen: PenInput,
     pub(super) window: GlWindow,
     pub(super) occluded: bool,
+    pub(super) close_requested: bool,
     pub(super) canvas: canvas::CanvasWorkspace,
     pub(super) frame_rate: frame_rate::FrameRate,
     pub(super) frames: frame_scheduler::FrameScheduler,
@@ -48,6 +49,7 @@ impl Runtime {
             pen,
             window,
             occluded: false,
+            close_requested: false,
             canvas,
             frame_rate: frame_rate::FrameRate::default(),
             frames: frame_scheduler::FrameScheduler::default(),
@@ -74,7 +76,7 @@ impl Runtime {
         let mut process_input = true;
         let size = self.window.window.inner_size();
         let fps = self.frame_rate.fps();
-        self.renderer.draw(&self.window, |ui| {
+        self.close_requested = self.renderer.draw(&self.window, |ui| {
             let scene = self.canvas.show(
                 ui,
                 show_renderer_info,

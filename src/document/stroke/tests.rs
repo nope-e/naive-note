@@ -47,3 +47,24 @@ fn old_version_one_raw_samples_without_native_attributes_still_decode() {
     assert_eq!(sample.time_us, 7);
     assert_eq!(sample.pressure, None);
 }
+#[test]
+fn pressure_curve_presets_have_distinct_widths_and_fixed_mode_ignores_pressure() {
+    let mut style = super::PenStyle {
+        max_width_pt: 10.0,
+        min_width_ratio: 0.2,
+        ..Default::default()
+    };
+    for (gamma, expected) in [
+        (0.0, 10.0),
+        (1.0, 4.0),
+        (0.5, 6.0),
+        (1.0 / 3.0, 7.039_684_199_579_493),
+        (2.0, 2.5),
+        (3.0, 2.125),
+    ] {
+        style.pressure_gamma = gamma;
+        assert!((style.width(0.25) - expected).abs() < 1e-9);
+        assert!((style.width(1.0) - 10.0).abs() < 1e-9);
+        assert!((style.width(0.0) - if gamma == 0.0 { 10.0 } else { 2.0 }).abs() < 1e-9);
+    }
+}

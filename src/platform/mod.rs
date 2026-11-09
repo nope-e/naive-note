@@ -30,8 +30,9 @@ impl GlWindow {
     pub fn new(event_loop: &ActiveEventLoop) -> Result<Self> {
         let attributes = Window::default_attributes()
             .with_title("Naive Note")
-            .with_inner_size(LogicalSize::new(1100.0, 780.0))
-            .with_min_inner_size(LogicalSize::new(320.0, 240.0))
+            .with_inner_size(LogicalSize::new(1280.0, 900.0))
+            .with_min_inner_size(LogicalSize::new(640.0, 480.0))
+            .with_decorations(false)
             .with_visible(false);
         let template = ConfigTemplateBuilder::new()
             .with_alpha_size(8)

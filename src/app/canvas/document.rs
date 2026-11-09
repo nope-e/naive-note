@@ -27,6 +27,7 @@ pub(super) struct CanvasDocument {
     loaded: Option<OpenDocument>,
     pending: Option<u64>,
     message: Option<String>,
+    notice: Option<String>,
     pending_export: Option<(u64, u64)>,
     loaded_request: Option<u64>,
     strokes: BTreeMap<u32, Vec<Arc<StrokeRecord>>>,
@@ -42,6 +43,7 @@ impl CanvasDocument {
             loaded: None,
             pending: None,
             message: None,
+            notice: None,
             pending_export: None,
             loaded_request: None,
             strokes: BTreeMap::new(),
@@ -49,6 +51,7 @@ impl CanvasDocument {
     }
 
     pub fn open(&mut self, path: PathBuf) {
+        self.notice = None;
         self.pending_export = None;
         if let Some(loaded) = self.loaded.as_mut() {
             loaded.preview.cancel(&self.worker);
@@ -60,7 +63,7 @@ impl CanvasDocument {
             }
             Err(error) => {
                 self.pending = None;
-                self.message = Some(format!("{error:#}"));
+                self.set_error(format!("打开失败：{error:#}"));
             }
         }
     }
@@ -73,7 +76,7 @@ impl CanvasDocument {
                 if let Some(loaded) = self.loaded.as_mut()
                     && let Err(error) = loaded.preview.receive(response)
                 {
-                    self.message = Some(format!("Detail render failed: {error}"));
+                    self.set_error(format!("高清渲染失败：{error}"));
                 }
                 None
             }
@@ -86,7 +89,7 @@ impl CanvasDocument {
                 self.pending_export = None;
                 match response.result {
                     Ok(path) => self.open(path),
-                    Err(error) => self.message = Some(format!("Test export failed: {error}")),
+                    Err(error) => self.set_error(format!("测试导出失败：{error}")),
                 }
                 None
             }
@@ -117,7 +120,7 @@ impl CanvasDocument {
                 Some(pages)
             }
             Err(error) => {
-                self.message = Some(format!("Open failed: {error}"));
+                self.set_error(format!("打开失败：{error}"));
                 None
             }
         }
@@ -128,6 +131,7 @@ impl CanvasDocument {
         self.pending = None;
         self.loaded = None;
         self.message = None;
+        self.notice = None;
         self.pending_export = None;
         self.loaded_request = None;
         self.strokes.clear();
@@ -175,6 +179,51 @@ impl CanvasDocument {
 
     pub fn message(&self) -> Option<&str> {
         self.message.as_deref()
+    }
+
+    fn set_error(&mut self, message: String) {
+        self.notice = Some(message.clone());
+        self.message = Some(message);
+    }
+
+    pub fn notice(&self) -> Option<&str> {
+        self.notice.as_deref()
+    }
+
+    pub fn dismiss_notice(&mut self) {
+        self.notice = None;
+    }
+
+    pub fn title(&self) -> String {
+        self.loaded.as_ref().map_or_else(
+            || "新建文档".to_owned(),
+            |loaded| {
+                loaded
+                    .pdf
+                    .path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            },
+        )
+    }
+
+    pub fn subtitle(&self) -> String {
+        if self.pending.is_some() {
+            return "正在打开 PDF…".to_owned();
+        }
+        if self.pending_export.is_some() {
+            return "正在导出测试 PDF…".to_owned();
+        }
+        let count = self.stroke_count();
+        if count > 0 {
+            format!("草稿 · {count} 笔未保存")
+        } else if self.is_loaded() {
+            "PDF 文档".to_owned()
+        } else {
+            "草稿".to_owned()
+        }
     }
 
     pub fn update_scene(

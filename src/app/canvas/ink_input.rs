@@ -9,12 +9,19 @@ mod tests;
 use std::{sync::Arc, time::Instant};
 
 use crate::{
-    document::{Point, StrokeRecord},
+    document::{PenStyle, Point, StrokeRecord},
     ink::{ActiveInk, LiveStroke},
 };
 
 use super::view::CanvasView;
 use navigation::Navigation;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum CanvasTool {
+    #[default]
+    Pen,
+    Pan,
+}
 
 pub(super) struct CanvasInput {
     active: Option<LiveStroke>,
@@ -23,8 +30,12 @@ pub(super) struct CanvasInput {
     mouse_active: bool,
     navigation: Option<Navigation>,
     last_position: Option<Point>,
+    pub tool: CanvasTool,
     pub mouse_pen: bool,
     pub smoothing: bool,
+    pub style: PenStyle,
+    // Only consulted on Down; UI/canvas ownership then remains fixed until Up.
+    pub ui_blocked: bool,
     clock: Instant,
 }
 
@@ -36,14 +47,29 @@ impl Default for CanvasInput {
             mouse_active: false,
             navigation: None,
             last_position: None,
+            tool: CanvasTool::default(),
             mouse_pen: false,
             smoothing: true,
+            style: PenStyle::default(),
+            ui_blocked: false,
             clock: Instant::now(),
         }
     }
 }
 
 impl CanvasInput {
+    pub fn for_editor() -> Self {
+        Self {
+            mouse_pen: true,
+            style: PenStyle {
+                color_rgb: [0, 0, 0],
+                max_width_pt: 4.6,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
     /// A keyboard tool switch ends the logical stroke at its last ink sample.
     /// The physical contact continues as navigation until Up/Cancel.
     fn finish_stroke(&mut self) -> Option<Arc<StrokeRecord>> {

@@ -26,9 +26,13 @@ impl Runtime {
                 ..
             } => {
                 let down = *state == ElementState::Pressed;
-                let owned = self
-                    .canvas
-                    .mouse_button(down, self.mouse_position, self.modifiers);
+                let owned = self.canvas.mouse_button(
+                    down,
+                    self.mouse_position,
+                    self.modifiers,
+                    self.mouse_position
+                        .is_some_and(|point| self.renderer.ui_contains_point(point)),
+                );
                 if owned || (!down && self.mouse_owned) {
                     self.mouse_owned = down;
                     self.request_repaint();
@@ -63,7 +67,11 @@ impl Runtime {
             self.request_repaint();
         }
         for sample in samples {
-            if self.canvas.pen_sample(sample) {
+            let over_ui = self.renderer.ui_contains_point(Point::new(
+                sample.sample.position[0],
+                sample.sample.position[1],
+            ));
+            if self.canvas.pen_sample(sample, over_ui) {
                 self.renderer.pen_ui_event(sample);
             }
         }

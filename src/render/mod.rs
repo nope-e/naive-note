@@ -13,7 +13,7 @@ use winit::{dpi::PhysicalSize, event::WindowEvent, event_loop::EventLoopProxy, w
 
 use crate::{
     app::UserEvent,
-    document::{CanvasViewport, PageGeometry, ViewTransform},
+    document::{CanvasViewport, PageGeometry, Point, ViewTransform},
     pdf::{PageBitmap, PageTile},
     platform::GlWindow,
 };
@@ -45,6 +45,19 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    /// Floating chrome and popups take priority over the paper below them.
+    pub fn ui_contains_point(&self, physical: Point) -> bool {
+        let context = &self.ui.context;
+        let scale = f64::from(context.pixels_per_point());
+        egui::Popup::is_any_open(context)
+            || context
+                .layer_id_at(egui::pos2(
+                    (physical.x / scale) as f32,
+                    (physical.y / scale) as f32,
+                ))
+                .is_some_and(|layer| layer.order != egui::Order::Background)
+    }
+
     pub fn new(window: &GlWindow, proxy: EventLoopProxy<UserEvent>) -> Result<Self> {
         let skia = skia::SkiaRenderer::new(window)?;
         let ui = EguiRenderer::new(window, proxy)?;
@@ -117,8 +130,19 @@ impl Renderer {
         &mut self,
         window: &GlWindow,
         mut build_ui: impl FnMut(&mut egui::Ui) -> Option<CanvasScene>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.resize(window)?;
+        egui_winit::update_viewport_info(
+            self.ui
+                .state
+                .egui_input_mut()
+                .viewports
+                .entry(egui::ViewportId::ROOT)
+                .or_default(),
+            &self.ui.context,
+            &window.window,
+            false,
+        );
         let input = self.ui.state.take_egui_input(&window.window);
         let mut scene = None;
         let mut output = self.ui.context.run_ui(input, |ui| scene = build_ui(ui));
@@ -153,7 +177,41 @@ impl Renderer {
             &primitives,
             &mut output.textures_delta,
         );
-        window.present()
+        window.present()?;
+        let mut close_requested = false;
+        if let Some(viewport) = output.viewport_output.get_mut(&egui::ViewportId::ROOT) {
+            for command in std::mem::take(&mut viewport.commands) {
+                match command {
+                    egui::ViewportCommand::Close => close_requested = true,
+                    egui::ViewportCommand::Minimized(value) => window.window.set_minimized(value),
+                    egui::ViewportCommand::Maximized(value) => window.window.set_maximized(value),
+                    egui::ViewportCommand::StartDrag => {
+                        if let Err(error) = window.window.drag_window() {
+                            log::warn!("drag window: {error}");
+                        }
+                    }
+                    egui::ViewportCommand::BeginResize(direction) => {
+                        use egui::ResizeDirection as E;
+                        use winit::window::ResizeDirection as W;
+                        let direction = match direction {
+                            E::North => W::North,
+                            E::South => W::South,
+                            E::East => W::East,
+                            E::West => W::West,
+                            E::NorthEast => W::NorthEast,
+                            E::NorthWest => W::NorthWest,
+                            E::SouthEast => W::SouthEast,
+                            E::SouthWest => W::SouthWest,
+                        };
+                        if let Err(error) = window.window.drag_resize_window(direction) {
+                            log::warn!("resize window: {error}");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(close_requested)
     }
 }
 
@@ -167,7 +225,7 @@ impl EguiRenderer {
     fn new(window: &GlWindow, proxy: EventLoopProxy<UserEvent>) -> Result<Self> {
         let context = egui::Context::default();
         fonts::configure(&context);
-        context.set_visuals(egui::Visuals::light());
+        crate::app::theme::configure(&context);
         context.options_mut(|options| options.zoom_with_keyboard = false);
         context.set_request_repaint_callback(move |request| {
             if let Some(at) = Instant::now().checked_add(request.delay) {

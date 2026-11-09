@@ -19,6 +19,9 @@ impl CanvasInput {
         modifiers: egui::Modifiers,
     ) -> (bool, Option<Arc<StrokeRecord>>) {
         if down {
+            if self.ui_blocked {
+                return (false, None);
+            }
             if self.contact.is_some() || self.mouse_active {
                 return (false, None);
             }
@@ -40,7 +43,7 @@ impl CanvasInput {
             let Some(target) = view.stroke_target(position) else {
                 return (false, None);
             };
-            let mut stroke = LiveStroke::new(target, self.smoothing);
+            let mut stroke = LiveStroke::new(target, self.smoothing, self.style.clone());
             stroke.push_mouse(position, self.time_us(), StrokePhase::Down);
             self.active = Some(stroke);
             self.mouse_active = true;

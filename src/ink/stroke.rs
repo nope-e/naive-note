@@ -27,7 +27,7 @@ pub struct LiveStroke {
 }
 
 impl LiveStroke {
-    pub fn new(target: StrokeTarget, smoothing: bool) -> Self {
+    pub fn new(target: StrokeTarget, smoothing: bool, style: PenStyle) -> Self {
         let modeler = smoothing.then(InkModeler::new);
         let processing = modeler
             .as_ref()
@@ -42,12 +42,7 @@ impl LiveStroke {
                 raw_samples: Vec::new(),
                 modeled_samples: Vec::new(),
                 outline: Vec::new(),
-                style: PenStyle {
-                    color_rgb: [25, 105, 190],
-                    max_width_pt: 2.0,
-                    min_width_ratio: 0.2,
-                    pressure_gamma: 1.5,
-                },
+                style,
                 processing,
             }),
         }

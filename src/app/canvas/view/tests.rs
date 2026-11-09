@@ -1,6 +1,25 @@
 use super::super::area::ZoomGesture;
 use super::*;
 
+#[test]
+fn draft_starts_at_actual_size_and_explicit_fit_still_works() {
+    let mut view = CanvasView::draft();
+    let viewport =
+        CanvasViewport::new(Rect::new(0.0, 96.0, 1280.0, 888.0), 1.0, (1280, 900)).unwrap();
+    view.update_viewport(viewport);
+    assert_eq!(view.transform.zoom(), 1.0);
+    assert!(!view.fit_to_page);
+    let size = view.page().paper_size();
+    near(
+        view.transform
+            .paper_to_logical(Point::new(size.width * 0.5, 0.0)),
+        Point::new(viewport.logical.center().x, viewport.logical.min.y + 24.0),
+    );
+    view.apply_action(ViewAction::Fit, viewport.logical);
+    assert!(view.fit_to_page);
+    assert!(view.transform.zoom() < 1.0);
+}
+
 fn setup() -> (CanvasView, CanvasViewport) {
     let mut view = CanvasView::new(vec![
         PageGeometry::new(Rect::new(20.0, 30.0, 220.0, 330.0), Rotation::R0, 1.5).unwrap(),
