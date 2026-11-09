@@ -1,10 +1,14 @@
-//! Small vector icons, independent of the installed font's symbol coverage.
+//! Embedded Lucide SVG icons; egui caches textures at the current DPI.
 
-use egui::{Color32, Painter, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
+use egui::{Color32, Rect, Stroke, StrokeKind, pos2, vec2};
 
 #[derive(Clone, Copy)]
 pub(super) enum Icon {
     Check,
+    New,
+    Save,
+    Print,
+    Restore,
     Pages,
     Eye,
     Download,
@@ -27,225 +31,45 @@ pub(super) enum Icon {
     Previous,
     Next,
     Hand,
+    RotateClockwise,
     None,
 }
 
-pub(super) fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
-    let size = rect.width().min(rect.height());
-    let origin = rect.center() - vec2(size, size) * 0.5;
-    let point = |x: f32, y: f32| origin + vec2(x, y) * (size / 24.0);
-    let stroke = Stroke::new(1.6, color);
-    let line = |a: (f32, f32), b: (f32, f32)| {
-        painter.line_segment([point(a.0, a.1), point(b.0, b.1)], stroke);
+pub(super) fn paint(ui: &egui::Ui, rect: Rect, icon: Icon, color: Color32) {
+    let source = match icon {
+        Icon::Check => egui::include_image!("../../../../assets/icons/lucide/check.svg"),
+        Icon::New => egui::include_image!("../../../../assets/icons/lucide/file-plus.svg"),
+        Icon::Save => egui::include_image!("../../../../assets/icons/lucide/save.svg"),
+        Icon::Print => egui::include_image!("../../../../assets/icons/lucide/printer.svg"),
+        Icon::Restore => egui::include_image!("../../../../assets/icons/lucide/copy.svg"),
+        Icon::Pages => egui::include_image!("../../../../assets/icons/lucide/panel-left.svg"),
+        Icon::Eye => egui::include_image!("../../../../assets/icons/lucide/eye-off.svg"),
+        Icon::Download => egui::include_image!("../../../../assets/icons/lucide/download.svg"),
+        Icon::Open => egui::include_image!("../../../../assets/icons/lucide/folder-open.svg"),
+        Icon::Menu => egui::include_image!("../../../../assets/icons/lucide/menu.svg"),
+        Icon::Maximize => egui::include_image!("../../../../assets/icons/lucide/square.svg"),
+        Icon::Close => egui::include_image!("../../../../assets/icons/lucide/x.svg"),
+        Icon::Pen => egui::include_image!("../../../../assets/icons/lucide/pencil-line.svg"),
+        Icon::Marker => egui::include_image!("../../../../assets/icons/lucide/highlighter.svg"),
+        Icon::Text => egui::include_image!("../../../../assets/icons/lucide/type.svg"),
+        Icon::Eraser => egui::include_image!("../../../../assets/icons/lucide/eraser.svg"),
+        Icon::Select => egui::include_image!("../../../../assets/icons/lucide/square-dashed.svg"),
+        Icon::Settings => egui::include_image!("../../../../assets/icons/lucide/settings.svg"),
+        Icon::Undo => egui::include_image!("../../../../assets/icons/lucide/undo-2.svg"),
+        Icon::Redo => egui::include_image!("../../../../assets/icons/lucide/redo-2.svg"),
+        Icon::Plus => egui::include_image!("../../../../assets/icons/lucide/plus.svg"),
+        Icon::Palette => egui::include_image!("../../../../assets/icons/lucide/palette.svg"),
+        Icon::Previous => egui::include_image!("../../../../assets/icons/lucide/chevron-left.svg"),
+        Icon::Next => egui::include_image!("../../../../assets/icons/lucide/chevron-right.svg"),
+        Icon::Hand => egui::include_image!("../../../../assets/icons/lucide/hand.svg"),
+        Icon::RotateClockwise => egui::include_image!("../../../../assets/icons/lucide/rotate-cw.svg"),
+        Icon::Minimize | Icon::Minus => {
+            egui::include_image!("../../../../assets/icons/lucide/minus.svg")
+        }
+        Icon::None => return,
     };
-    let path = |points: &[(f32, f32)], closed: bool| {
-        let points: Vec<Pos2> = points.iter().map(|&(x, y)| point(x, y)).collect();
-        painter.add(if closed {
-            egui::Shape::closed_line(points, stroke)
-        } else {
-            egui::Shape::line(points, stroke)
-        });
-    };
-    match icon {
-        Icon::Check => path(&[(5.0, 12.0), (10.0, 17.0), (19.0, 7.0)], false),
-        Icon::Pages => {
-            for x in [5.0, 13.0] {
-                for y in [5.0, 13.0] {
-                    painter.rect_filled(
-                        Rect::from_two_pos(point(x, y), point(x + 5.0, y + 5.0)),
-                        0.8,
-                        color,
-                    );
-                }
-            }
-        }
-        Icon::Eye => {
-            path(
-                &[
-                    (3.0, 12.0),
-                    (7.0, 7.0),
-                    (12.0, 5.0),
-                    (17.0, 7.0),
-                    (21.0, 12.0),
-                    (17.0, 17.0),
-                    (12.0, 19.0),
-                    (7.0, 17.0),
-                ],
-                true,
-            );
-            painter.circle_stroke(point(12.0, 12.0), size * 0.13, stroke);
-            line((4.0, 21.0), (21.0, 3.0));
-        }
-        Icon::Download => {
-            path(
-                &[(4.0, 17.0), (4.0, 20.0), (20.0, 20.0), (20.0, 17.0)],
-                false,
-            );
-            line((12.0, 3.0), (12.0, 15.0));
-            path(&[(8.0, 11.0), (12.0, 15.0), (16.0, 11.0)], false);
-        }
-        Icon::Open => {
-            path(
-                &[
-                    (14.0, 4.0),
-                    (5.0, 4.0),
-                    (5.0, 20.0),
-                    (19.0, 20.0),
-                    (19.0, 13.0),
-                ],
-                false,
-            );
-            path(&[(11.0, 13.0), (20.0, 4.0), (14.0, 4.0)], false);
-            line((20.0, 4.0), (20.0, 10.0));
-        }
-        Icon::Menu => {
-            for y in [6.0, 12.0, 18.0] {
-                line((5.0, y), (19.0, y));
-            }
-        }
-        Icon::Minimize | Icon::Minus => line((6.0, 12.0), (18.0, 12.0)),
-        Icon::Plus => {
-            line((6.0, 12.0), (18.0, 12.0));
-            line((12.0, 6.0), (12.0, 18.0));
-        }
-        Icon::Maximize => {
-            painter.rect_stroke(
-                Rect::from_two_pos(point(6.0, 6.0), point(18.0, 18.0)),
-                1.0,
-                stroke,
-                StrokeKind::Inside,
-            );
-        }
-        Icon::Close => {
-            line((7.0, 7.0), (17.0, 17.0));
-            line((17.0, 7.0), (7.0, 17.0));
-        }
-        Icon::Pen => {
-            path(
-                &[
-                    (5.0, 19.0),
-                    (7.0, 13.0),
-                    (17.0, 3.0),
-                    (21.0, 7.0),
-                    (11.0, 17.0),
-                    (5.0, 19.0),
-                ],
-                false,
-            );
-            line((15.0, 5.0), (19.0, 9.0));
-            line((7.0, 13.0), (11.0, 17.0));
-            painter.circle_filled(point(5.0, 19.0), size * 0.09, color);
-        }
-        Icon::Marker => {
-            path(
-                &[(5.0, 15.0), (14.0, 4.0), (21.0, 10.0), (12.0, 20.0)],
-                true,
-            );
-            line((7.0, 13.0), (14.0, 19.0));
-            line((3.0, 21.0), (11.0, 21.0));
-        }
-        Icon::Text => {
-            path(&[(4.0, 19.0), (10.0, 5.0), (16.0, 19.0)], false);
-            line((7.0, 14.0), (13.0, 14.0));
-            line((20.0, 5.0), (20.0, 19.0));
-        }
-        Icon::Eraser => {
-            path(
-                &[
-                    (3.0, 14.0),
-                    (12.0, 5.0),
-                    (21.0, 14.0),
-                    (15.0, 20.0),
-                    (9.0, 20.0),
-                ],
-                true,
-            );
-            line((8.0, 9.0), (17.0, 18.0));
-        }
-        Icon::Select => {
-            let dotted = Stroke::new(1.5, color);
-            for i in 0..4 {
-                let d = 5.0 + i as f32 * 4.0;
-                for (a, b) in [
-                    ((d, 5.0), (d + 2.0, 5.0)),
-                    ((d, 19.0), (d + 2.0, 19.0)),
-                    ((5.0, d), (5.0, d + 2.0)),
-                    ((19.0, d), (19.0, d + 2.0)),
-                ] {
-                    painter.line_segment([point(a.0, a.1), point(b.0, b.1)], dotted);
-                }
-            }
-        }
-        Icon::Settings => {
-            painter.circle_stroke(point(12.0, 12.0), size * 0.24, Stroke::new(2.5, color));
-            painter.circle_stroke(point(12.0, 12.0), size * 0.06, stroke);
-            for i in 0..8 {
-                let angle = i as f32 * std::f32::consts::TAU / 8.0;
-                let direction = vec2(angle.cos(), angle.sin());
-                painter.line_segment(
-                    [
-                        point(12.0, 12.0) + direction * size * 0.24,
-                        point(12.0, 12.0) + direction * size * 0.35,
-                    ],
-                    Stroke::new(2.2, color),
-                );
-            }
-        }
-        Icon::Undo | Icon::Redo => {
-            let mirror = |x: f32| {
-                if matches!(icon, Icon::Redo) {
-                    24.0 - x
-                } else {
-                    x
-                }
-            };
-            path(
-                &[(mirror(9.0), 6.0), (mirror(4.0), 11.0), (mirror(9.0), 16.0)],
-                false,
-            );
-            path(
-                &[
-                    (mirror(4.0), 11.0),
-                    (mirror(14.0), 11.0),
-                    (mirror(18.0), 13.0),
-                    (mirror(19.0), 17.0),
-                ],
-                false,
-            );
-        }
-        Icon::Palette => {
-            for (x, y, r) in [(9.0, 8.0, 4.0), (6.0, 16.0, 4.0), (16.0, 16.0, 4.0)] {
-                painter.circle_stroke(point(x, y), r * size / 24.0, stroke);
-            }
-        }
-        Icon::Previous => path(&[(15.0, 6.0), (9.0, 12.0), (15.0, 18.0)], false),
-        Icon::Next => path(&[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)], false),
-        Icon::Hand => {
-            path(
-                &[
-                    (6.0, 13.0),
-                    (6.0, 7.0),
-                    (9.0, 7.0),
-                    (9.0, 3.0),
-                    (12.0, 3.0),
-                    (12.0, 9.0),
-                    (12.0, 5.0),
-                    (15.0, 5.0),
-                    (15.0, 11.0),
-                    (15.0, 8.0),
-                    (18.0, 8.0),
-                    (18.0, 16.0),
-                    (15.0, 21.0),
-                    (9.0, 21.0),
-                    (3.0, 14.0),
-                    (4.0, 12.0),
-                    (9.0, 16.0),
-                ],
-                false,
-            );
-        }
-        Icon::None => {}
-    }
+    // White source strokes allow tinting without keeping a texture per color.
+    egui::Image::new(source).tint(color).paint_at(ui, rect);
 }
 
 pub(super) fn button(
@@ -280,8 +104,8 @@ pub(super) fn button(
             Color32::from_rgb(125, 125, 138)
         };
         paint(
-            ui.painter(),
-            Rect::from_center_size(rect.center(), vec2(18.0, 18.0)),
+            ui,
+            Rect::from_center_size(rect.center(), vec2(20.0, 20.0)),
             icon,
             color,
         );

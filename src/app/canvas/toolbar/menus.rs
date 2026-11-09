@@ -30,7 +30,7 @@ pub(super) fn main_menu(
         .max_height(height)
         .show(ui, |ui| {
             widgets::section(ui, "文档");
-            widgets::menu_row(ui, Icon::Pages, "新建文档", "Ctrl+T", false);
+            widgets::menu_row(ui, Icon::New, "新建文档", "Ctrl+T", false);
             command(
                 ui,
                 Icon::Open,
@@ -40,8 +40,8 @@ pub(super) fn main_menu(
                 ToolbarAction::Open,
                 action,
             );
-            widgets::menu_row(ui, Icon::Download, "保存文档", "Ctrl+S", false);
-            widgets::menu_row(ui, Icon::Download, "另存为", "Ctrl+Shift+S", false);
+            widgets::menu_row(ui, Icon::Save, "保存文档", "Ctrl+S", false);
+            widgets::menu_row(ui, Icon::Save, "另存为", "Ctrl+Shift+S", false);
             command(
                 ui,
                 Icon::Close,
@@ -54,7 +54,7 @@ pub(super) fn main_menu(
             ui.add_space(5.0);
             ui.separator();
             widgets::menu_row(ui, Icon::Download, "导出…", "", false);
-            widgets::menu_row(ui, Icon::Pages, "打印文档", "Ctrl+P", false);
+            widgets::menu_row(ui, Icon::Print, "打印文档", "Ctrl+P", false);
             ui.add_space(5.0);
             ui.separator();
             ui.menu_button("开发工具", |ui| {
@@ -122,7 +122,7 @@ pub(super) fn view_menu(
         }
     });
     ui.separator();
-    if widgets::menu_row(ui, Icon::None, "顺时针旋转 90°", "", true).clicked() {
+    if widgets::menu_row(ui, Icon::RotateClockwise, "顺时针旋转 90°", "", true).clicked() {
         *action = Some(ToolbarAction::View(ViewAction::Rotate));
     }
 }

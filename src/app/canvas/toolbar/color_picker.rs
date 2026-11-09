@@ -99,7 +99,7 @@ impl ColorPicker {
                             + u32::from(rgb[2]) * 114
                             > 165_000;
                         icons::paint(
-                            ui.painter(),
+                            ui,
                             Rect::from_center_size(rect.center(), vec2(16.0, 16.0)),
                             Icon::Check,
                             if light {

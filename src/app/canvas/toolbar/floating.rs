@@ -128,15 +128,12 @@ impl WorkspaceToolbar {
                 ui.set_height((context.content_rect().height() - 200.0).clamp(260.0, 390.0));
                 ui.vertical_centered(|ui| {
                     let (rect, _) = ui.allocate_exact_size(vec2(32.0, 38.0), Sense::hover());
-                    let points = [(13.0, 28.0), (-6.0, 18.0), (15.0, 11.0), (26.0, 8.0)]
-                        .map(|(x, y)| rect.min + vec2(x, y));
-                    ui.painter()
-                        .add(egui::epaint::CubicBezierShape::from_points_stroke(
-                            points,
-                            false,
-                            Color32::TRANSPARENT,
-                            Stroke::new(5.0, theme::TEXT),
-                        ));
+                    icons::paint(
+                        ui,
+                        egui::Rect::from_center_size(rect.center(), vec2(24.0, 24.0)),
+                        Icon::Pen,
+                        theme::TEXT,
+                    );
                     super::settings::button(ui, state, action);
                     ui.add_space(4.0);
                     ui.separator();

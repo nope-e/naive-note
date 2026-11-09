@@ -52,7 +52,7 @@ pub(super) fn menu_row(
             Color32::from_rgb(119, 119, 130)
         };
         icons::paint(
-            ui.painter(),
+            ui,
             Rect::from_center_size(rect.left_center() + vec2(15.0, 0.0), vec2(16.0, 16.0)),
             icon,
             color,
@@ -125,7 +125,7 @@ pub(super) fn choice(
             .galley(rect.min + vec2(12.0, 31.0), text, color);
         if selected {
             icons::paint(
-                ui.painter(),
+                ui,
                 Rect::from_min_size(rect.right_top() + vec2(-29.0, 9.0), vec2(15.0, 15.0)),
                 Icon::Check,
                 theme::ACCENT,

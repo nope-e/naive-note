@@ -9,6 +9,7 @@ description = "A local PDF handwriting application built with egui and Skia"
 anyhow = "1.0"
 ciborium = "0.2.2"
 egui = { version = "=0.37.0", features = ["default_fonts"] }
+egui_extras = { version = "=0.37.0", default-features = false, features = ["svg"] }
 egui-winit = { version = "=0.37.0", default-features = false }
 egui_glow = "=0.37.0"
 env_logger = "0.11"

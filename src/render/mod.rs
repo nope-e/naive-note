@@ -224,6 +224,7 @@ struct EguiRenderer {
 impl EguiRenderer {
     fn new(window: &GlWindow, proxy: EventLoopProxy<UserEvent>) -> Result<Self> {
         let context = egui::Context::default();
+        egui_extras::install_image_loaders(&context);
         fonts::configure(&context);
         crate::app::theme::configure(&context);
         context.options_mut(|options| options.zoom_with_keyboard = false);

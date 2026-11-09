@@ -112,7 +112,11 @@ impl WorkspaceToolbar {
                         for (icon, label, command) in [
                             (Icon::Close, "关闭窗口", ViewportCommand::Close),
                             (
-                                Icon::Maximize,
+                                if ui.input(|input| input.viewport().maximized.unwrap_or(false)) {
+                                    Icon::Restore
+                                } else {
+                                    Icon::Maximize
+                                },
                                 "最大化 / 还原",
                                 ViewportCommand::Maximized(
                                     !ui.input(|input| input.viewport().maximized.unwrap_or(false)),
@@ -131,7 +135,7 @@ impl WorkspaceToolbar {
                             };
                             ui.painter().circle_filled(button.center(), 10.0, color);
                             icons::paint(
-                                ui.painter(),
+                                ui,
                                 Rect::from_center_size(button.center(), vec2(12.0, 12.0)),
                                 icon,
                                 theme::TEXT,
