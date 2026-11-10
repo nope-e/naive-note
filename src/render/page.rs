@@ -111,7 +111,25 @@ pub(super) fn draw(
         draft_paper::draw_contents(canvas, scene.source_page, scene.reference_lines);
     }
     for stroke in &scene.strokes {
+        let transform = scene
+            .selection_transform
+            .filter(|_| scene.selected_ids.contains(&stroke.id));
+        if let Some(transform) = transform {
+            canvas.save();
+            apply_transform(canvas, transform);
+        }
         draw_stroke(canvas, stroke);
+        if transform.is_some() {
+            canvas.restore();
+        }
+    }
+    if let Some(preview) = &scene.selection_preview {
+        canvas.save();
+        apply_transform(canvas, preview.transform);
+        for stroke in &preview.strokes {
+            draw_stroke(canvas, stroke);
+        }
+        canvas.restore();
     }
     if let Some(active) = &scene.active_stroke {
         // Fill confirmed ink and prediction together: translucent overlaps must
@@ -126,33 +144,7 @@ pub(super) fn draw(
             &active.record.style,
         );
     }
-    let mut selection = Paint::default();
-    selection
-        .set_anti_alias(true)
-        .set_style(Style::Stroke)
-        .set_stroke_width(1.5 / scale)
-        .set_color(Color::from_rgb(75, 165, 255));
-    for bounds in &scene.selected_bounds {
-        let mut rect = SkRect::new(
-            bounds.min.x as f32,
-            bounds.min.y as f32,
-            bounds.max.x as f32,
-            bounds.max.y as f32,
-        );
-        rect.outset((3.0 / scale, 3.0 / scale));
-        canvas.draw_rect(rect, &selection);
-    }
-    if let Some(bounds) = scene.selection_rect {
-        let rect = SkRect::new(
-            bounds.min.x as f32,
-            bounds.min.y as f32,
-            bounds.max.x as f32,
-            bounds.max.y as f32,
-        );
-        canvas.draw_rect(rect, &selection);
-        selection.set_style(Style::Fill).set_alpha(28);
-        canvas.draw_rect(rect, &selection);
-    }
+    super::selection::draw(canvas, scene, scale);
     canvas.restore();
 
     // Touching pages share this gray edge. Disable antialiasing so the shared
@@ -187,6 +179,15 @@ pub(super) fn draw(
 
 fn draw_stroke(canvas: &Canvas, stroke: &StrokeRecord) {
     draw_outline(canvas, stroke.outline.iter(), &stroke.style);
+}
+
+fn apply_transform(canvas: &Canvas, transform: crate::document::InkTransform) {
+    canvas.translate((
+        (transform.center.x + transform.translation.x) as f32,
+        (transform.center.y + transform.translation.y) as f32,
+    ));
+    canvas.rotate(transform.radians.to_degrees() as f32, None);
+    canvas.translate((-transform.center.x as f32, -transform.center.y as f32));
 }
 
 fn draw_outline<'a>(

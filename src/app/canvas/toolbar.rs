@@ -169,7 +169,7 @@ fn shortcuts(ui: &egui::Ui, document: &DocumentActions, zoom: f64) -> Option<Too
         } else if !editing_text && input.key_pressed(egui::Key::Escape) {
             Some(ToolbarAction::ClearSelection)
         } else if !editing_text
-            && document.tool == CanvasTool::Select
+            && document.tool.is_selection()
             && input.modifiers.ctrl
             && input.key_pressed(egui::Key::A)
         {

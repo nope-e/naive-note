@@ -3,6 +3,7 @@
 mod draft_paper;
 mod fonts;
 mod page;
+mod selection;
 mod skia;
 
 use std::{sync::Arc, time::Instant};
@@ -39,8 +40,12 @@ pub struct PageScene {
     pub tiles: Vec<Arc<PageTile>>,
     pub strokes: Vec<Arc<crate::document::StrokeRecord>>,
     pub active_stroke: Option<crate::ink::ActiveInk>,
-    pub selected_bounds: Vec<crate::document::Rect>,
+    pub selected_ids: std::collections::HashSet<uuid::Uuid>,
+    pub selection_transform: Option<crate::document::InkTransform>,
+    pub selection_preview: Option<SelectionPreview>,
+    pub selection_overlay: Option<SelectionOverlay>,
     pub selection_rect: Option<crate::document::Rect>,
+    pub selection_path: Vec<Point>,
     pub draft_paper: bool,
     pub reference_lines: crate::document::ReferenceLines,
     pub page_end_y: Option<f64>,
@@ -50,6 +55,19 @@ pub struct Renderer {
     ui: EguiRenderer,
     skia: skia::SkiaRenderer,
     size: PhysicalSize<u32>,
+}
+
+#[derive(Clone)]
+pub struct SelectionOverlay {
+    pub corners: [Point; 4],
+    pub rotation_anchor: Point,
+    pub rotation_handle: Point,
+}
+
+#[derive(Clone)]
+pub struct SelectionPreview {
+    pub strokes: Vec<Arc<crate::document::StrokeRecord>>,
+    pub transform: crate::document::InkTransform,
 }
 
 impl Renderer {

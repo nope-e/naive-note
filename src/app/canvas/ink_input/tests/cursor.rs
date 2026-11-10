@@ -156,6 +156,7 @@ fn object_tools_and_ui_contacts_never_use_the_hidden_ink_cursor() {
             CanvasTool::Select,
             CanvasCursor::Icon(CursorIcon::Crosshair),
         ),
+        (CanvasTool::Lasso, CanvasCursor::Icon(CursorIcon::Crosshair)),
         (CanvasTool::Eraser, CanvasCursor::Eraser),
     ] {
         input.tool = tool;

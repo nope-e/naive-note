@@ -50,7 +50,7 @@ impl CanvasInput {
         match tool {
             CanvasTool::Pen | CanvasTool::Highlighter => CanvasCursor::Style(settings.regular),
             CanvasTool::Eraser => CanvasCursor::Eraser,
-            CanvasTool::Select => CanvasCursor::Icon(CursorIcon::Crosshair),
+            CanvasTool::Select | CanvasTool::Lasso => CanvasCursor::Icon(CursorIcon::Crosshair),
             CanvasTool::Pan => unreachable!("pan handled above"),
         }
     }

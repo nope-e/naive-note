@@ -8,4 +8,6 @@ SVG geometry is unchanged. The currentColor stroke is replaced with #ffffff so e
 
 Zoom menu icons: `maximize` for fit page, `move-horizontal` for fit width, and `square-equal` for actual size.
 
+Selection tools: `square-dashed` for rectangle selection and `lasso-select` for freehand lasso selection.
+
 See [LICENSE](LICENSE) for the Lucide ISC license and the MIT license for Feather-derived icons.

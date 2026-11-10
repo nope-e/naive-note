@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::Point;
+use super::{InkTransform, Point};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InkKind {
@@ -133,6 +133,10 @@ pub struct StrokeRecord {
     pub id: Uuid,
     pub page_index: u32,
     pub raw_samples: Vec<RawSample>,
+    /// Captured raw points are immutable; modeled points and outline are already
+    /// in edited paper coordinates. Legacy version-1 records use identity.
+    #[serde(default, skip_serializing_if = "InkTransform::is_identity")]
+    pub edit_transform: InkTransform,
     pub modeled_samples: Vec<ModeledSample>,
     pub outline: Vec<PathCommand>,
     pub style: PenStyle,

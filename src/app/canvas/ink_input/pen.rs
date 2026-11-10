@@ -95,7 +95,7 @@ impl CanvasInput {
                     self.cancel_object();
                     return (false, self.finish_stroke());
                 }
-                self.move_object(position);
+                self.move_object(position, view);
                 if let Some(stroke) = self.active.as_mut() {
                     stroke.push_pen(sample);
                 }
@@ -108,7 +108,7 @@ impl CanvasInput {
                     self.cancel_object();
                     return (false, self.finish_stroke());
                 }
-                self.move_object(position);
+                self.move_object(position, view);
                 if self.finish_object() {
                     return (ui_owned, None);
                 }

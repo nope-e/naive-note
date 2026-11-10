@@ -265,8 +265,12 @@ impl CanvasView {
                 tiles: Vec::new(),
                 strokes: Vec::new(),
                 active_stroke: None,
-                selected_bounds: Vec::new(),
+                selected_ids: Default::default(),
+                selection_transform: None,
+                selection_preview: None,
+                selection_overlay: None,
                 selection_rect: None,
+                selection_path: Vec::new(),
                 draft_paper,
                 reference_lines: crate::document::ReferenceLines::default(),
                 page_end_y: (page.index + 1 == self.page_count())

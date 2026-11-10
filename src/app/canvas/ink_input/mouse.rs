@@ -68,7 +68,7 @@ impl CanvasInput {
                 return (true, self.finish_stroke());
             }
             if let Some(position) = position {
-                self.move_object(position);
+                self.move_object(position, view);
             }
             if self.finish_object() {
                 return (true, None);
@@ -104,7 +104,7 @@ impl CanvasInput {
             self.cancel_object();
             return self.finish_stroke();
         }
-        self.move_object(position);
+        self.move_object(position, view);
         if let Some(stroke) = self.active.as_mut() {
             stroke.push_mouse(position, time, StrokePhase::Move);
         }

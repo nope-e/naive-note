@@ -7,13 +7,14 @@ use std::{
 
 use uuid::Uuid;
 
-use super::{PageGeometry, ReferenceLayer, StrokeRecord};
+use super::{InkTransform, PageGeometry, ReferenceLayer, StrokeRecord};
 
 #[derive(Clone, Debug)]
 pub enum EditCommand {
     AppendPage(PageGeometry),
     AddStroke(Arc<StrokeRecord>),
     RemoveStrokes(Vec<RemovedStroke>),
+    TransformStrokes(Vec<TransformedStroke>),
     ReferenceLines {
         before: Option<ReferenceLayer>,
         after: ReferenceLayer,
@@ -24,6 +25,14 @@ pub enum EditCommand {
 pub struct RemovedStroke {
     index: usize,
     stroke: Arc<StrokeRecord>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TransformedStroke {
+    before_index: usize,
+    before: Arc<StrokeRecord>,
+    after_index: usize,
+    after: Arc<StrokeRecord>,
 }
 
 /// Identities name content states, not history depths. Undo/redo return to the
@@ -93,6 +102,61 @@ impl EditHistory {
         self.revision
     }
 
+    /// One gesture is one history entry; replacements keep UUIDs and stacking.
+    pub fn transform_strokes(&mut self, ids: &HashSet<Uuid>, transform: InkTransform) -> bool {
+        self.edit_strokes(ids, transform, None)
+    }
+
+    pub fn move_strokes(
+        &mut self,
+        ids: &HashSet<Uuid>,
+        transform: InkTransform,
+        destination: u32,
+    ) -> bool {
+        self.edit_strokes(ids, transform, Some(destination))
+    }
+
+    fn edit_strokes(
+        &mut self,
+        ids: &HashSet<Uuid>,
+        transform: InkTransform,
+        destination: Option<u32>,
+    ) -> bool {
+        if !transform.is_finite() {
+            return false;
+        }
+        let mut incoming = 0;
+        let changed = self
+            .strokes
+            .values()
+            .flat_map(|page| page.iter().enumerate())
+            .filter(|(_, stroke)| {
+                ids.contains(&stroke.id)
+                    && (!transform.is_identity()
+                        || destination.is_some_and(|page| page != stroke.page_index))
+            })
+            .map(|(index, stroke)| {
+                let page = destination.unwrap_or(stroke.page_index);
+                let after_index = if page == stroke.page_index {
+                    index
+                } else {
+                    let index = self.strokes(page).len() + incoming;
+                    incoming += 1;
+                    index
+                };
+                let mut after = stroke.transformed(transform);
+                after.page_index = page;
+                TransformedStroke {
+                    before_index: index,
+                    before: Arc::clone(stroke),
+                    after_index,
+                    after: Arc::new(after),
+                }
+            })
+            .collect::<Vec<_>>();
+        !changed.is_empty() && self.execute(EditCommand::TransformStrokes(changed))
+    }
+
     pub fn strokes(&self, page: u32) -> &[Arc<StrokeRecord>] {
         self.strokes.get(&page).map_or(&[], Vec::as_slice)
     }
@@ -117,6 +181,7 @@ impl EditHistory {
     pub fn execute(&mut self, command: EditCommand) -> bool {
         match &command {
             EditCommand::RemoveStrokes(strokes) if strokes.is_empty() => return false,
+            EditCommand::TransformStrokes(strokes) if strokes.is_empty() => return false,
             EditCommand::AddStroke(stroke) if self.stroke_ids.contains(&stroke.id) => return false,
             EditCommand::ReferenceLines { after, .. } if self.reference_lines == Some(*after) => {
                 return false;
@@ -157,6 +222,7 @@ impl EditHistory {
                 }
             }
             EditCommand::ReferenceLines { before, .. } => self.reference_lines = *before,
+            EditCommand::TransformStrokes(strokes) => self.replace_strokes(strokes, false),
             EditCommand::AddStroke(stroke) => {
                 let page = self
                     .strokes
@@ -199,6 +265,7 @@ impl EditHistory {
                 self.stroke_ids.retain(|id| !ids.contains(id));
             }
             EditCommand::ReferenceLines { after, .. } => self.reference_lines = Some(*after),
+            EditCommand::TransformStrokes(strokes) => self.replace_strokes(strokes, true),
             EditCommand::AddStroke(stroke) => {
                 self.stroke_ids.insert(stroke.id);
                 self.strokes
@@ -206,6 +273,33 @@ impl EditHistory {
                     .or_default()
                     .push(Arc::clone(stroke));
             }
+        }
+    }
+
+    fn replace_strokes(&mut self, changed: &[TransformedStroke], forward: bool) {
+        // Remove first, then restore exact per-page slots in ascending order.
+        // Transfers append above target ink; undo restores both pages' stacking.
+        let ids: HashSet<_> = changed.iter().map(|s| s.before.id).collect();
+        self.strokes.retain(|_, page| {
+            page.retain(|s| !ids.contains(&s.id));
+            !page.is_empty()
+        });
+        let mut replacements = changed
+            .iter()
+            .map(|s| {
+                if forward {
+                    (s.after_index, &s.after)
+                } else {
+                    (s.before_index, &s.before)
+                }
+            })
+            .collect::<Vec<_>>();
+        replacements.sort_by_key(|(index, stroke)| (stroke.page_index, *index));
+        for (index, stroke) in replacements {
+            self.strokes
+                .entry(stroke.page_index)
+                .or_default()
+                .insert(index, Arc::clone(stroke));
         }
     }
 

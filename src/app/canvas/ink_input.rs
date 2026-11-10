@@ -26,7 +26,14 @@ pub(super) enum CanvasTool {
     Highlighter,
     Eraser,
     Select,
+    Lasso,
     Pan,
+}
+
+impl CanvasTool {
+    pub fn is_selection(self) -> bool {
+        matches!(self, Self::Select | Self::Lasso)
+    }
 }
 
 pub(super) struct CanvasInput {

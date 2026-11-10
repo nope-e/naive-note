@@ -2,6 +2,7 @@
 
 mod edit;
 mod geometry;
+mod ink_transform;
 mod layout;
 mod object_geometry;
 mod reference_lines;
@@ -10,6 +11,7 @@ mod view;
 
 pub use edit::{DocumentRevision, EditCommand, EditHistory};
 pub use geometry::{PageGeometry, Point, Rect, Rotation, Size};
+pub use ink_transform::InkTransform;
 pub use layout::PageLayout;
 pub use reference_lines::{ReferenceLayer, ReferenceLines, ReferenceMark, ReferencePattern};
 pub use stroke::{

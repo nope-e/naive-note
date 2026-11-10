@@ -270,8 +270,29 @@ impl CanvasDocument {
         }
     }
 
+    pub fn transform_strokes(
+        &mut self,
+        ids: &std::collections::HashSet<uuid::Uuid>,
+        transform: crate::document::InkTransform,
+    ) {
+        if self.can_ink() && self.edits.transform_strokes(ids, transform) {
+            self.edit_changed();
+        }
+    }
+
     pub fn can_undo(&self) -> bool {
         self.can_ink() && self.edits.can_undo()
+    }
+
+    pub fn move_strokes(
+        &mut self,
+        ids: &std::collections::HashSet<uuid::Uuid>,
+        transform: crate::document::InkTransform,
+        destination: u32,
+    ) {
+        if self.can_ink() && self.edits.move_strokes(ids, transform, destination) {
+            self.edit_changed();
+        }
     }
 
     pub fn can_redo(&self) -> bool {

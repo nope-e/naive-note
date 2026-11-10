@@ -1,6 +1,6 @@
 //! Frozen Down-time mapping from physical input to the original page's paper space.
 
-use crate::document::{CanvasViewport, PageGeometry, Point, ViewTransform};
+use crate::document::{CanvasViewport, InkTransform, PageGeometry, Point, ViewTransform};
 
 #[derive(Clone, Copy)]
 pub struct StrokeTarget {
@@ -12,6 +12,28 @@ pub struct StrokeTarget {
 }
 
 impl StrokeTarget {
+    pub fn physical_position(self, paper: Point) -> Point {
+        let displayed = self
+            .displayed
+            .pdf_to_paper(self.original.paper_to_pdf(paper));
+        self.viewport
+            .logical_to_physical(self.view.paper_to_logical(displayed))
+    }
+
+    /// Both pages share one frozen viewport and scale. Mapping their original
+    /// paper spaces is rigid even with different CropBoxes, rotations and UserUnits.
+    pub fn transform_to(self, destination: Self) -> InkTransform {
+        let source_rotation =
+            self.displayed.rotation().degrees() - self.original.rotation().degrees();
+        let destination_rotation =
+            destination.displayed.rotation().degrees() - destination.original.rotation().degrees();
+        InkTransform {
+            translation: destination.paper_position(self.physical_position(Point::default())),
+            radians: f64::from(source_rotation - destination_rotation).to_radians(),
+            ..Default::default()
+        }
+    }
+
     pub fn paper_position(self, physical: Point) -> Point {
         let displayed = self
             .view

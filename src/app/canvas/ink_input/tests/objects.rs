@@ -5,7 +5,7 @@ use crate::document::InkKind;
 #[test]
 fn pen_and_mouse_route_object_tools_without_ink_even_when_mouse_writing_is_off() {
     for mouse in [false, true] {
-        for tool in [CanvasTool::Eraser, CanvasTool::Select] {
+        for tool in [CanvasTool::Eraser, CanvasTool::Select, CanvasTool::Lasso] {
             let (mut input, mut view, position) = setup();
             input.tool = tool;
             input.mouse_pen = false;

@@ -6,6 +6,8 @@ use crate::{
 };
 use std::sync::Arc;
 
+mod selection;
+
 fn fixture() -> (CanvasDocument, StrokeTarget) {
     let original = PageGeometry::new(Rect::new(20., 30., 620., 830.), Rotation::R0, 1.5).unwrap();
     let mut view = super::super::view::CanvasView::new(vec![original]);
@@ -47,6 +49,7 @@ fn gesture(
 ) -> ObjectGesture {
     ObjectGesture {
         target,
+        destination: Some(target),
         tool,
         start,
         previous: start,
@@ -98,6 +101,8 @@ fn selection_topmost_toggle_box_and_cancel_preserve_document_revision() {
     );
     assert_eq!(editor.selected.len(), 3);
     // A box that merely intersects the ink does not enclose its object.
+    // Begin with no selection: dragging an existing selection now moves it.
+    editor.clear();
     let partial = gesture(
         target,
         CanvasTool::Select,

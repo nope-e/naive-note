@@ -6,6 +6,9 @@ use crate::{document::Point, ink::StrokeTarget};
 #[derive(Clone, Copy)]
 pub(in crate::app::canvas) struct ObjectGesture {
     pub target: StrokeTarget,
+    /// Paper under the current pointer; ownership and lasso/rotation stay bound
+    /// to target, while a move can transfer its group here when released.
+    pub destination: Option<StrokeTarget>,
     pub tool: CanvasTool,
     pub start: Point,
     pub previous: Point,
@@ -35,7 +38,7 @@ impl CanvasInput {
         tool: CanvasTool,
         additive: bool,
     ) -> bool {
-        if !matches!(tool, CanvasTool::Eraser | CanvasTool::Select) {
+        if tool != CanvasTool::Eraser && !tool.is_selection() {
             return false;
         }
         let Some(target) = view.stroke_target(position) else {
@@ -44,6 +47,7 @@ impl CanvasInput {
         let position = target.paper_position(position);
         let gesture = ObjectGesture {
             target,
+            destination: Some(target),
             tool,
             start: position,
             previous: position,
@@ -55,14 +59,16 @@ impl CanvasInput {
         true
     }
 
-    pub(super) fn move_object(&mut self, position: Point) {
+    pub(super) fn move_object(&mut self, position: Point, view: &CanvasView) {
         if let Some(gesture) = &mut self.object {
+            let destination = view.stroke_target(position);
             let position = gesture.target.paper_position(position);
             if !position.is_finite() {
                 return;
             }
             gesture.previous = gesture.position;
             gesture.position = position;
+            gesture.destination = destination;
             self.object_events.push(ObjectEvent::Update(*gesture));
         }
     }

@@ -439,7 +439,9 @@ impl CanvasWorkspace {
                 }
                 Some(ToolbarAction::Tool(tool)) => {
                     self.input.tool = tool;
-                    self.objects.clear();
+                    if !tool.is_selection() {
+                        self.objects.clear();
+                    }
                     action = None;
                 }
                 Some(ToolbarAction::DeleteSelected) => {
@@ -642,11 +644,23 @@ impl CanvasWorkspace {
             ui.ctx().request_repaint();
         }
         let cursor = (!self.canvas_blocked()).then(|| {
-            self.input.cursor(
+            let cursor = self.input.cursor(
                 self.persistence.settings.cursor,
                 ui.input(|input| input.modifiers),
                 self.area.dragging(),
-            )
+            );
+            if matches!(
+                cursor,
+                crate::cursor::CanvasCursor::Icon(egui::CursorIcon::Crosshair)
+            ) && let Some(physical) = ui.input(|input| input.pointer.hover_pos()).map(|p| {
+                let dpi = f64::from(ui.ctx().pixels_per_point());
+                Point::new(f64::from(p.x) * dpi, f64::from(p.y) * dpi)
+            }) && let Some(icon) = self.objects.cursor(&self.document, &self.view, physical)
+            {
+                crate::cursor::CanvasCursor::Icon(icon)
+            } else {
+                cursor
+            }
         });
         self.area.update_cursor(ui.ctx(), cursor);
         scene

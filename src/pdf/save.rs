@@ -448,6 +448,7 @@ pub(super) fn edit_data_status(document: &PdfDocument) -> String {
 fn validate_stroke(stroke: &StrokeRecord, geometry: PageGeometry) -> Result<()> {
     ensure!(
         !stroke.id.is_nil()
+            && stroke.edit_transform.is_finite()
             && !stroke.modeled_samples.is_empty()
             && !stroke.raw_samples.is_empty()
             && !stroke.outline.is_empty(),

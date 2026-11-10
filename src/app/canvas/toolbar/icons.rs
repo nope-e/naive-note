@@ -22,6 +22,7 @@ pub(super) enum Icon {
     Text,
     Eraser,
     Select,
+    Lasso,
     Settings,
     Undo,
     Redo,
@@ -56,6 +57,7 @@ pub(super) fn paint(ui: &egui::Ui, rect: Rect, icon: Icon, color: Color32) {
         Icon::Text => egui::include_image!("../../../../assets/icons/lucide/type.svg"),
         Icon::Eraser => egui::include_image!("../../../../assets/icons/lucide/eraser.svg"),
         Icon::Select => egui::include_image!("../../../../assets/icons/lucide/square-dashed.svg"),
+        Icon::Lasso => egui::include_image!("../../../../assets/icons/lucide/lasso-select.svg"),
         Icon::Settings => egui::include_image!("../../../../assets/icons/lucide/settings.svg"),
         Icon::Undo => egui::include_image!("../../../../assets/icons/lucide/undo-2.svg"),
         Icon::Redo => egui::include_image!("../../../../assets/icons/lucide/redo-2.svg"),
@@ -65,8 +67,12 @@ pub(super) fn paint(ui: &egui::Ui, rect: Rect, icon: Icon, color: Color32) {
         Icon::Next => egui::include_image!("../../../../assets/icons/lucide/chevron-right.svg"),
         Icon::Hand => egui::include_image!("../../../../assets/icons/lucide/hand.svg"),
         Icon::FitPage => egui::include_image!("../../../../assets/icons/lucide/maximize.svg"),
-        Icon::FitWidth => egui::include_image!("../../../../assets/icons/lucide/move-horizontal.svg"),
-        Icon::ActualSize => egui::include_image!("../../../../assets/icons/lucide/square-equal.svg"),
+        Icon::FitWidth => {
+            egui::include_image!("../../../../assets/icons/lucide/move-horizontal.svg")
+        }
+        Icon::ActualSize => {
+            egui::include_image!("../../../../assets/icons/lucide/square-equal.svg")
+        }
         Icon::RotateClockwise => {
             egui::include_image!("../../../../assets/icons/lucide/rotate-cw.svg")
         }

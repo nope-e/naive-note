@@ -3,6 +3,26 @@
 use super::{Point, Rect, StrokeRecord};
 
 impl StrokeRecord {
+    /// Even-odd lasso containment of the complete pressure outline, including
+    /// concave boundaries between samples. Crossing the lasso is not enclosure.
+    pub fn enclosed_by_lasso(&self, polygon: &[Point]) -> bool {
+        if polygon.len() < 3 || self.modeled_samples.is_empty() {
+            return false;
+        }
+        if !self
+            .modeled_samples
+            .iter()
+            .all(|s| point_in_polygon(s.position, polygon))
+        {
+            return false;
+        }
+        !polygon
+            .iter()
+            .zip(polygon.iter().cycle().skip(1))
+            .take(polygon.len())
+            .any(|(&a, &b)| self.hit_segment(a, b, 0.0))
+    }
+
     pub fn bounds(&self) -> Rect {
         let mut bounds = Rect::new(
             f64::INFINITY,
@@ -67,6 +87,22 @@ impl StrokeRecord {
     }
 }
 
+fn point_in_polygon(point: Point, polygon: &[Point]) -> bool {
+    let mut inside = false;
+    for (&a, &b) in polygon
+        .iter()
+        .zip(polygon.iter().cycle().skip(1))
+        .take(polygon.len())
+    {
+        if (a.y > point.y) != (b.y > point.y)
+            && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x
+        {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
 fn point_distance(p: Point, a: Point, b: Point) -> f64 {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
@@ -99,6 +135,48 @@ fn segment_distance(a: Point, b: Point, c: Point, d: Point) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concave_lasso_requires_complete_pressure_ink_not_just_inside_endpoints_or_bounds() {
+        use crate::document::{ModeledSample, PageGeometry, Rotation};
+        let page = PageGeometry::new(Rect::new(0., 0., 600., 800.), Rotation::R0, 1.).unwrap();
+        let mut stroke = crate::ink::test_support::pressure_stroke(page).unwrap();
+        stroke.style.max_width_pt = 4.;
+        stroke.style.min_width_ratio = 1.;
+        stroke.modeled_samples = [Point::new(10., 50.), Point::new(90., 50.)]
+            .into_iter()
+            .map(|position| ModeledSample {
+                position,
+                time_us: 0,
+                pressure: 1.,
+            })
+            .collect();
+        let p = Point::new;
+        let rectangle = [p(0., 0.), p(100., 0.), p(100., 100.), p(0., 100.)];
+        assert!(stroke.enclosed_by_lasso(&rectangle));
+        let mut reversed = rectangle;
+        reversed.reverse();
+        assert!(stroke.enclosed_by_lasso(&reversed));
+        let notch = [
+            p(0., 0.),
+            p(40., 0.),
+            p(40., 70.),
+            p(60., 70.),
+            p(60., 0.),
+            p(100., 0.),
+            p(100., 100.),
+            p(0., 100.),
+        ];
+        // Both endpoints lie in the arms, but the sparse centerline crosses the notch.
+        assert!(!stroke.enclosed_by_lasso(&notch));
+        let narrow = [p(0., 49.), p(100., 49.), p(100., 51.), p(0., 51.)];
+        assert!(
+            !stroke.enclosed_by_lasso(&narrow),
+            "ink width must be inside too"
+        );
+        assert!(!stroke.enclosed_by_lasso(&rectangle[..2]));
+        assert!(!stroke.enclosed_by_lasso(&[p(0., 0.), p(100., 0.), p(50., 0.)]));
+    }
 
     #[test]
     fn tapered_ink_does_not_hit_empty_space_beside_its_thin_end() {

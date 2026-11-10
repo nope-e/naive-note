@@ -53,6 +53,7 @@ impl LiveStroke {
                 id: Uuid::new_v4(),
                 page_index: target.page_index,
                 raw_samples: Vec::new(),
+                edit_transform: Default::default(),
                 modeled_samples: Vec::new(),
                 outline: Vec::new(),
                 style,

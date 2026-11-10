@@ -1,13 +1,12 @@
-//! Object selection and one-command eraser gestures over immutable ink records.
+//! Selection, transform previews and atomic eraser gestures over immutable ink.
+
+mod selection;
 
 use super::{
     document::CanvasDocument,
     ink_input::{CanvasTool, ObjectEvent, ObjectGesture},
 };
-use crate::{
-    document::{Point, Rect},
-    render::CanvasScene,
-};
+use crate::document::{Point, Rect};
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -17,6 +16,7 @@ pub(super) struct ObjectEditing {
     erased: HashSet<Uuid>,
     gesture: Option<ObjectGesture>,
     selection_before: Option<HashSet<Uuid>>,
+    selection_gesture: Option<selection::SelectionGesture>,
 }
 
 impl ObjectEditing {
@@ -46,15 +46,18 @@ impl ObjectEditing {
             match event {
                 ObjectEvent::Update(gesture) => self.update(gesture, document),
                 ObjectEvent::Finish => {
+                    self.finish_selection(document);
                     document.remove_strokes(&self.erased);
                     self.erased.clear();
                     self.gesture = None;
                     self.selection_before = None;
+                    self.selection_gesture = None;
                     self.prune(document);
                 }
                 ObjectEvent::Cancel => {
                     self.erased.clear();
                     self.gesture = None;
+                    self.selection_gesture = None;
                     if let Some(before) = self.selection_before.take() {
                         self.selected = before;
                     }
@@ -83,56 +86,9 @@ impl ObjectEditing {
                 }
             }
         } else {
-            let before = self
-                .selection_before
-                .get_or_insert_with(|| self.selected.clone());
-            let rect = drag_rect(gesture);
-            let dragging = (gesture.position.x - gesture.start.x)
-                .hypot(gesture.position.y - gesture.start.y)
-                * scale
-                > 4.0;
-            self.selected = if gesture.additive {
-                before.clone()
-            } else {
-                HashSet::new()
-            };
-            if dragging {
-                self.selected.extend(
-                    strokes
-                        .iter()
-                        .filter(|stroke| {
-                            let bounds = stroke.bounds();
-                            rect.contains(bounds.min) && rect.contains(bounds.max)
-                        })
-                        .map(|s| s.id),
-                );
-            } else if let Some(stroke) = strokes
-                .iter()
-                .rev()
-                .find(|s| s.hit_segment(gesture.position, gesture.position, 5.0 / scale))
-                && !self.selected.insert(stroke.id)
-            {
-                self.selected.remove(&stroke.id);
-            }
+            self.update_selection(gesture, document);
         }
         self.gesture = Some(gesture);
-    }
-
-    pub fn decorate(&self, scene: &mut CanvasScene) {
-        for page in &mut scene.pages {
-            page.strokes
-                .retain(|stroke| !self.erased.contains(&stroke.id));
-            page.selected_bounds = page
-                .strokes
-                .iter()
-                .filter(|s| self.selected.contains(&s.id))
-                .map(|s| s.bounds())
-                .collect();
-            page.selection_rect = self
-                .gesture
-                .filter(|g| g.tool == CanvasTool::Select && g.target.page_index == page.index)
-                .map(drag_rect);
-        }
     }
 }
 

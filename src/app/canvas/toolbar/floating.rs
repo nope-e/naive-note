@@ -232,8 +232,13 @@ impl WorkspaceToolbar {
                         ),
                         (
                             Icon::Select,
-                            "对象选择 · 点选 / 框选 · Shift 多选",
+                            "对象选择 · 点选 / 框选 · 拖动选区跨页移动 · 圆柄旋转 · Shift 多选",
                             CanvasTool::Select,
+                        ),
+                        (
+                            Icon::Lasso,
+                            "套索选择 · 圈住整笔 · 拖动选区跨页移动 · 圆柄旋转 · Shift 多选",
+                            CanvasTool::Lasso,
                         ),
                         (Icon::Hand, "移动工具", CanvasTool::Pan),
                     ] {
@@ -246,7 +251,7 @@ impl WorkspaceToolbar {
                     }
                     icons::separator(ui);
                     icons::button(ui, Icon::Text, "文本", false, false);
-                    if state.document.tool == CanvasTool::Select {
+                    if state.document.tool.is_selection() {
                         if ui
                             .add_enabled(state.can_edit_document, egui::Button::new("全选本页"))
                             .on_hover_text("Ctrl+A")

@@ -56,6 +56,7 @@ pub fn pressure_stroke(page: PageGeometry) -> Result<StrokeRecord> {
         id: Uuid::new_v4(),
         page_index: 0,
         raw_samples,
+        edit_transform: Default::default(),
         modeled_samples,
         outline,
         style,

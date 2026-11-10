@@ -1,6 +1,7 @@
 //! Pure workspace routing with a silent PDF worker; never creates a window.
 
 mod page_expansion;
+mod selection;
 
 use std::sync::Arc;
 

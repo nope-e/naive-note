@@ -5,6 +5,109 @@ use std::path::PathBuf;
 use super::*;
 use crate::ink::test_support::pressure_stroke;
 
+#[test]
+fn moved_saved_objects_change_pdf_page_and_reopen_without_old_annotations() {
+    use crate::document::{EditHistory, InkTransform};
+    use std::sync::Arc;
+    for rotation in [0, 90, 180, 270] {
+        let base = fixture(rotation);
+        let a = Arc::new(stroke_for(&base));
+        let mut b = stroke_for(&base);
+        b.style.kind = InkKind::Highlighter;
+        let b = Arc::new(b);
+        let objects = [a, b];
+        let id = Uuid::new_v4();
+        let (first, _) = serialize(&base, &objects, id).unwrap();
+        let mut history = EditHistory::from_strokes(objects.iter().cloned());
+        let ids = objects.iter().map(|s| s.id).collect();
+        assert!(history.move_strokes(
+            &ids,
+            InkTransform {
+                translation: Point::new(-20., -30.),
+                ..Default::default()
+            },
+            1
+        ));
+        let (saved, _) = serialize(&first, &history.snapshot(), id).unwrap();
+        let document = PdfDocument::from_bytes(&saved).unwrap();
+        let data = read_edit_data(&document).unwrap().unwrap();
+        assert_eq!(data.strokes.len(), 2);
+        assert_eq!(document.load_pdf_page(0).unwrap().annotations().count(), 1);
+        assert_eq!(document.load_pdf_page(1).unwrap().annotations().count(), 2);
+        for (s, original) in data.strokes.iter().zip(&objects) {
+            assert_eq!(s.stroke.page_index, 1);
+            assert_eq!(s.stroke.id, original.id);
+            assert_eq!(s.stroke.raw_samples, original.raw_samples);
+        }
+        // Reopen and move back; later saving an undo also restores the old page.
+        let mut reopened =
+            EditHistory::from_strokes(data.strokes.iter().map(|s| Arc::new(s.stroke.clone())));
+        assert!(reopened.move_strokes(
+            &ids,
+            InkTransform {
+                translation: Point::new(20., 30.),
+                ..Default::default()
+            },
+            0
+        ));
+        let (back, _) = serialize(&saved, &reopened.snapshot(), id).unwrap();
+        let document = PdfDocument::from_bytes(&back).unwrap();
+        assert_eq!(document.load_pdf_page(0).unwrap().annotations().count(), 3);
+        assert_eq!(document.load_pdf_page(1).unwrap().annotations().count(), 0);
+        history.undo();
+        let (undone, _) = serialize(&saved, &history.snapshot(), id).unwrap();
+        let document = PdfDocument::from_bytes(&undone).unwrap();
+        let restored = read_edit_data(&document).unwrap().unwrap();
+        for (s, original) in restored.strokes.iter().zip(&objects) {
+            assert_eq!(s.stroke, **original);
+        }
+        assert_eq!(document.load_pdf_page(0).unwrap().annotations().count(), 3);
+        assert_eq!(document.load_pdf_page(1).unwrap().annotations().count(), 0);
+    }
+}
+
+#[test]
+fn transformed_reopened_ink_replaces_original_annotation_and_preserves_raw_capture() {
+    use crate::document::InkTransform;
+    use std::sync::Arc;
+    for rotation in [0, 90, 180, 270] {
+        for highlighter in [false, true] {
+            let base = fixture(rotation);
+            let mut record = stroke_for(&base);
+            if highlighter {
+                record.style.kind = InkKind::Highlighter;
+            }
+            let id = Uuid::new_v4();
+            let (first, _) = serialize(&base, &[Arc::new(record.clone())], id).unwrap();
+            let edited = record.transformed(InkTransform {
+                center: record.bounds().center(),
+                translation: Point::new(23., -17.),
+                radians: 0.71,
+            });
+            let (saved, _) = serialize(&first, &[Arc::new(edited.clone())], id).unwrap();
+            let document = PdfDocument::from_bytes(&saved).unwrap();
+            let data = read_edit_data(&document).unwrap().unwrap();
+            assert_eq!(data.strokes.len(), 1);
+            assert_eq!(data.strokes[0].stroke, edited);
+            assert_eq!(data.strokes[0].stroke.raw_samples, record.raw_samples);
+            assert_eq!(data.strokes[0].stroke.id, record.id);
+            assert_eq!(document.load_pdf_page(0).unwrap().annotations().count(), 2);
+            // Another edit over the saved PDF keeps one native object and its UUID.
+            let again = edited.transformed(InkTransform {
+                translation: Point::new(-9., 11.),
+                ..Default::default()
+            });
+            let (saved_again, _) = serialize(&saved, &[Arc::new(again.clone())], id).unwrap();
+            let reopened = PdfDocument::from_bytes(&saved_again).unwrap();
+            assert_eq!(
+                read_edit_data(&reopened).unwrap().unwrap().strokes[0].stroke,
+                again
+            );
+            assert_eq!(reopened.load_pdf_page(0).unwrap().annotations().count(), 2);
+        }
+    }
+}
+
 fn serialize(
     base: &[u8],
     strokes: &[std::sync::Arc<StrokeRecord>],
