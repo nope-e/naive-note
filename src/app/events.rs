@@ -28,6 +28,9 @@ impl ApplicationHandler<UserEvent> for Application {
         }
         match Runtime::new(event_loop, self.proxy.clone(), self.pen.clone()) {
             Ok(mut runtime) => {
+                if let Some(path) = self.startup_pdf.take() {
+                    runtime.canvas.open_pdf(path);
+                }
                 // Windows may defer RedrawRequested for a hidden window. Submit the
                 // first frame synchronously before showing it, rather than waiting
                 // for a redraw that itself depends on the window becoming visible.

@@ -20,6 +20,8 @@
 | `ink-stroke-modeler-rs` 笔迹建模 | [crates.io 0.1.0](https://crates.io/crates/ink-stroke-modeler-rs/0.1.0)，Cargo.lock 锁定包校验和 | [MIT](licenses/ink-stroke-modeler-rs-MIT.txt) OR [Apache-2.0](licenses/ink-stroke-modeler-rs-Apache-2.0.txt) |
 | `windows` Win32 绑定 | [windows-rs 0.62.2](https://github.com/microsoft/windows-rs) | MIT OR Apache-2.0 |
 | Lucide 工具栏图标 | [固定版本及来源](assets/icons/lucide/README.md) | [ISC；Feather 衍生图标采用 MIT](assets/icons/lucide/LICENSE) |
+| `resvg` 应用图标栅格化（构建时） | [resvg 0.45.1](https://github.com/linebender/resvg) | MIT OR Apache-2.0 |
+| `winresource` Windows 图标与版本资源（构建时） | [winresource 0.1.31](https://github.com/BenjaminRi/winresource) | MIT |
 
 AGPL 全文见 [licenses/MuPDF-AGPL-3.0.txt](licenses/MuPDF-AGPL-3.0.txt)。发布包含 MuPDF 的应用时，需要按 AGPLv3 条款向接收者提供完整对应源码（包括构建所需的源码与脚本），并保留 Apache-2.0 及各第三方组件所需的许可证、版权和归属声明。MuPDF 包中的第三方库另有各自许可，制作发行包时需从锁定版本的 `mupdf-sys/mupdf` 源码一并汇总。
 

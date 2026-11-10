@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
 mod cursor;
@@ -11,5 +11,8 @@ mod storage;
 
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    app::run()
+    // Windows "Open with" passes the selected file as the first argument.
+    // Keep the native path intact, including Unicode and spaces.
+    let startup_pdf = std::env::args_os().nth(1).map(std::path::PathBuf::from);
+    app::run(startup_pdf)
 }

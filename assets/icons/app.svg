@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Naive Note</title>
+  <desc>A white folded note and an amber pencil on a teal rounded square.</desc>
+  <defs>
+    <linearGradient id="background" x1="24" y1="16" x2="224" y2="244" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#209da9"/>
+      <stop offset="1" stop-color="#155577"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="54" fill="url(#background)"/>
+  <path d="M80 52h65l40 40v106a14 14 0 0 1-14 14H80a14 14 0 0 1-14-14V66a14 14 0 0 1 14-14Z" fill="#103d59" opacity=".24"/>
+  <path d="M78 46h67l40 40v106a14 14 0 0 1-14 14H78a14 14 0 0 1-14-14V60a14 14 0 0 1 14-14Z" fill="#f5fbfc"/>
+  <path d="M145 46v28a12 12 0 0 0 12 12h28Z" fill="#b5dce3"/>
+  <path d="M86 100h38m-38 26h61m-61 26h32" fill="none" stroke="#94becb" stroke-width="9" stroke-linecap="round"/>
+  <g transform="translate(192 86) rotate(40)">
+    <path d="M-13 12a13 13 0 0 1 26 0v88l-13 27-13-27Z" fill="#123e58" opacity=".2" transform="translate(4 3)"/>
+    <path d="M-13 10a13 13 0 0 1 26 0v12h-26Z" fill="#163f59"/>
+    <path d="M-13 20h26v80h-26Z" fill="#ffc45a"/>
+    <path d="M-13 20h9v80h-9Z" fill="#ffdb8a"/>
+    <path d="M-13 18h26v9h-26Z" fill="#e7f3f5"/>
+    <path d="m-13 100 13 27 13-27Z" fill="#f6dfb2"/>
+    <path d="m-5 117 5 10 5-10Z" fill="#163f59"/>
+  </g>
+</svg>

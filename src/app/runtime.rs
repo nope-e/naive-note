@@ -2,7 +2,7 @@
 
 mod input;
 
-use std::{path::PathBuf, time::Instant};
+use std::time::Instant;
 
 use anyhow::Result;
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
@@ -39,10 +39,7 @@ impl Runtime {
     ) -> Result<Self> {
         let window = GlWindow::new(event_loop)?;
         let renderer = Renderer::new(&window, proxy.clone())?;
-        let mut canvas = canvas::CanvasWorkspace::new(proxy)?;
-        if let Some(path) = std::env::args_os().nth(1) {
-            canvas.open_pdf(PathBuf::from(path));
-        }
+        let canvas = canvas::CanvasWorkspace::new(proxy)?;
         pen.attach(&window.window)?;
         Ok(Self {
             renderer,

@@ -8,7 +8,7 @@ mod runtime;
 pub(crate) mod theme;
 mod window_frame;
 
-use std::time::Instant;
+use std::{path::PathBuf, time::Instant};
 
 use anyhow::{Context, Result};
 use winit::event_loop::{EventLoop, EventLoopProxy};
@@ -23,13 +23,14 @@ pub enum UserEvent {
     StorageResponse(Box<crate::storage::preferences::StorageResponse>),
 }
 
-pub fn run() -> Result<()> {
+pub fn run(startup_pdf: Option<PathBuf>) -> Result<()> {
     let pen = PenInput::default();
     let mut builder = EventLoop::<UserEvent>::with_user_event();
     pen.install(&mut builder);
     let event_loop = builder.build()?;
     let mut app = Application {
         runtime: None,
+        startup_pdf,
         proxy: event_loop.create_proxy(),
         error: None,
         show_renderer_info: false,
@@ -46,6 +47,7 @@ pub fn run() -> Result<()> {
 
 struct Application {
     runtime: Option<Runtime>,
+    startup_pdf: Option<PathBuf>,
     proxy: EventLoopProxy<UserEvent>,
     error: Option<anyhow::Error>,
     show_renderer_info: bool,

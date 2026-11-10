@@ -34,6 +34,11 @@ zstd = "0.14.3"
 tablet-input-windows = "=1.0.0"
 windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
+[build-dependencies]
+# Rasterize the app's vector artwork into the embedded multi-size Windows icon.
+resvg = { version = "=0.45.1", default-features = false }
+winresource = "=0.1.31"
+
 # Skia's published Windows binaries use the release CRT. Match it in MuPDF,
 # including cargo test, while keeping our own Rust code in the debug profile.
 [profile.dev.package.mupdf-sys]

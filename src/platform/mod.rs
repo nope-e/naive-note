@@ -17,6 +17,12 @@ use glutin::{
 use raw_window_handle::HasWindowHandle;
 use winit::{dpi::LogicalSize, event_loop::ActiveEventLoop, window::Window};
 
+#[cfg(windows)]
+use winit::{
+    platform::windows::{IconExtWindows, WindowAttributesExtWindows},
+    window::Icon,
+};
+
 /// Renderers must be dropped before this owner; the native window is dropped last.
 pub struct GlWindow {
     pub gl: Arc<glow::Context>,
@@ -34,6 +40,17 @@ impl GlWindow {
             .with_min_inner_size(LogicalSize::new(640.0, 480.0))
             .with_decorations(false)
             .with_visible(false);
+        #[cfg(windows)]
+        let attributes = {
+            // Resource 1 is generated from assets/icons/app.svg by build.rs.
+            let icon = Icon::from_resource(1, None).context("load embedded application icon")?;
+            let taskbar_icon =
+                Icon::from_resource(1, Some(winit::dpi::PhysicalSize::new(256, 256)))
+                    .context("load embedded taskbar icon")?;
+            attributes
+                .with_window_icon(Some(icon))
+                .with_taskbar_icon(Some(taskbar_icon))
+        };
         let template = ConfigTemplateBuilder::new()
             .with_alpha_size(8)
             .with_depth_size(0)
