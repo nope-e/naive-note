@@ -64,12 +64,16 @@ impl Settings {
 }
 
 pub fn app_data_dir() -> Result<PathBuf> {
-    if cfg!(debug_assertions) {
-        return Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".scratch/app-data"));
-    }
-    std::env::var_os("LOCALAPPDATA")
-        .map(|path| PathBuf::from(path).join("NaiveNote"))
-        .context("找不到本机应用数据目录，草稿自动保存不可用")
+    let base = if cfg!(debug_assertions) {
+        std::env::current_dir().context("无法获取当前工作目录")?
+    } else {
+        std::env::current_exe()
+            .context("无法获取程序路径")?
+            .parent()
+            .context("无法获取程序所在目录")?
+            .to_path_buf()
+    };
+    Ok(base.join("app_data"))
 }
 
 #[derive(Clone, Debug)]
@@ -113,8 +117,7 @@ fn read_settings(path: &Path) -> Result<Settings> {
             let mut bytes = Vec::new();
             file.take(64 * 1024 + 1).read_to_end(&mut bytes)?;
             ensure!(bytes.len() <= 64 * 1024, "设置文件过大");
-            let settings: Settings =
-                ciborium::from_reader(bytes.as_slice()).context("设置文件损坏")?;
+            let settings: Settings = serde_json::from_slice(&bytes).context("设置文件损坏")?;
             settings.validate()?;
             Ok(settings)
         }
@@ -125,8 +128,7 @@ fn read_settings(path: &Path) -> Result<Settings> {
 
 fn write_settings(path: &Path, settings: &Settings) -> Result<()> {
     settings.validate()?;
-    let mut bytes = Vec::new();
-    ciborium::into_writer(settings, &mut bytes)?;
+    let bytes = serde_json::to_vec_pretty(settings)?;
     super::save_atomic(path, super::fingerprint(path)?, &bytes, |staging| {
         ensure!(read_settings(staging)? == *settings, "设置回读不一致");
         Ok(())
@@ -160,7 +162,7 @@ impl SettingsWorker {
             .name("local-settings".to_owned())
             .spawn(move || {
                 let drafts_dir = root.join("drafts");
-                let path = root.join("settings.cbor");
+                let path = root.join("settings.json");
                 let mut warnings = Vec::new();
                 if let Err(error) = fs::create_dir_all(&drafts_dir) {
                     warnings.push(format!("无法创建本地数据目录：{error}"));

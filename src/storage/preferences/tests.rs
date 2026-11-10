@@ -31,7 +31,7 @@ impl Drop for Directory {
 #[test]
 fn settings_roundtrip_rejects_corruption_versions_and_out_of_range_values() {
     let directory = Directory::new();
-    let path = directory.0.join("settings.cbor");
+    let path = directory.0.join("settings.json");
     assert_eq!(read_settings(&path).unwrap(), Settings::default());
     let settings = Settings {
         color: [240, 50, 10],
@@ -65,8 +65,7 @@ fn settings_roundtrip_rejects_corruption_versions_and_out_of_range_values() {
     ] {
         assert!(write_settings(&path, &invalid).is_err());
         assert_eq!(fs::read(&path).unwrap(), before);
-        let mut bytes = Vec::new();
-        ciborium::into_writer(&invalid, &mut bytes).unwrap();
+        let bytes = serde_json::to_vec(&invalid).unwrap();
         fs::write(&path, bytes).unwrap();
         assert!(read_settings(&path).is_err());
         fs::write(&path, &before).unwrap();
@@ -78,7 +77,7 @@ fn settings_roundtrip_rejects_corruption_versions_and_out_of_range_values() {
 #[test]
 fn startup_survives_bad_settings_lists_only_owned_drafts_and_flushes_latest_settings() {
     let directory = Directory::new();
-    fs::write(directory.0.join("settings.cbor"), b"corrupt").unwrap();
+    fs::write(directory.0.join("settings.json"), b"corrupt").unwrap();
     let id = Uuid::new_v4();
     let copy = directory.0.join("drafts").join(format!("{id}.pdf"));
     fs::write(&copy, b"corrupt pdf").unwrap();
@@ -114,34 +113,22 @@ fn startup_survives_bad_settings_lists_only_owned_drafts_and_flushes_latest_sett
     worker.save(latest.clone());
     drop(worker);
     assert_eq!(
-        read_settings(&directory.0.join("settings.cbor")).unwrap(),
+        read_settings(&directory.0.join("settings.json")).unwrap(),
         latest
     );
 }
 
 #[test]
-fn old_settings_receive_reference_defaults_and_new_defaults_survive_roundtrip() {
-    #[derive(serde::Serialize)]
-    struct OldSettings {
-        version: u32,
-        autosave_seconds: u64,
-    }
-    let mut bytes = Vec::new();
-    ciborium::into_writer(
-        &OldSettings {
-            version: 1,
-            autosave_seconds: 7,
-        },
-        &mut bytes,
-    )
-    .unwrap();
-    let settings: Settings = ciborium::from_reader(bytes.as_slice()).unwrap();
+fn partial_json_settings_receive_defaults_and_new_defaults_survive_roundtrip() {
+    let directory = Directory::new();
+    let path = directory.0.join("settings.json");
+    fs::write(&path, br#"{"version":1,"autosave_seconds":7}"#).unwrap();
+    let settings = read_settings(&path).unwrap();
+    assert_eq!(settings.autosave_seconds, 7);
     assert_eq!(
         settings.reference_lines,
         crate::document::ReferenceLines::default()
     );
-    let directory = Directory::new();
-    let path = directory.0.join("settings.cbor");
     let changed = Settings {
         reference_lines: crate::document::ReferenceLines {
             pattern: crate::document::ReferencePattern::None,
@@ -153,4 +140,36 @@ fn old_settings_receive_reference_defaults_and_new_defaults_survive_roundtrip() 
     };
     write_settings(&path, &changed).unwrap();
     assert_eq!(read_settings(&path).unwrap(), changed);
+}
+
+#[test]
+fn startup_ignores_legacy_cbor_and_saves_only_json() {
+    let directory = Directory::new();
+    let legacy_path = directory.0.join("settings.cbor");
+    let legacy = Settings {
+        autosave_seconds: 7,
+        ..Settings::default()
+    };
+    let mut legacy_bytes = Vec::new();
+    ciborium::into_writer(&legacy, &mut legacy_bytes).unwrap();
+    fs::write(&legacy_path, &legacy_bytes).unwrap();
+    let (send, received) = mpsc::channel();
+    let worker = SettingsWorker::new(directory.0.clone(), move |response| {
+        let _ = send.send(response);
+    })
+    .unwrap();
+    let StorageResponse::Loaded {
+        settings, warnings, ..
+    } = received.recv_timeout(Duration::from_secs(5)).unwrap()
+    else {
+        panic!("expected startup inventory");
+    };
+    assert_eq!(settings, Settings::default());
+    assert!(warnings.is_empty());
+    let path = directory.0.join("settings.json");
+    assert!(!path.exists());
+    worker.save(settings.clone());
+    drop(worker);
+    assert_eq!(read_settings(&path).unwrap(), settings);
+    assert_eq!(fs::read(&legacy_path).unwrap(), legacy_bytes);
 }

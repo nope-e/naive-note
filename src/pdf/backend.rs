@@ -60,7 +60,7 @@ impl PdfSession {
             "Password-protected PDFs are not supported yet"
         );
         ensure!(document.page_count()? > 0, "PDF has no pages");
-        // Our saved reference vectors are displayed as a live overlay instead.
+        // Our saved reference vectors are recorded as a live background instead.
         // Keep `base` intact for lossless source preservation during saves.
         super::reference_lines::remove(&document)?;
         let mut pages = Vec::new();
@@ -135,8 +135,8 @@ impl PdfSession {
             let bounds = page.bounds()?;
             let mut display_list = DisplayList::new(bounds)?;
             let device = Device::from_display_list(&mut display_list)?;
-            page.run_contents(&device, &Matrix::IDENTITY)?;
             super::reference_lines::record(&device, &page, self.reference_lines)?;
+            page.run_contents(&device, &Matrix::IDENTITY)?;
             page.run_annotations(&device, &Matrix::IDENTITY)?;
             page.run_widgets(&device, &Matrix::IDENTITY)?;
             drop(device);

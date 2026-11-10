@@ -12,7 +12,7 @@ use crate::document::{
     Point, Rect, ReferenceLayer, ReferenceLines, ReferenceMark, ReferencePattern,
 };
 
-/// Record references between page content and annotations. This also covers
+/// Record references beneath source page content and all annotations, including
 /// third-party Ink annotations which have no Naive Note editing metadata.
 pub(super) fn record(
     device: &mupdf::Device,
@@ -144,10 +144,9 @@ pub(super) fn write(document: &mut PdfDocument, layer: ReferenceLayer) -> Result
         let unit = geometry.user_unit();
         let project = |p: Point| Point::new(crop.min.x + p.x / unit, crop.max.y - p.y / unit);
         let [r, g, b] = layer.lines.color_rgb.map(|v| f64::from(v) / 255.0);
-        // Balance a preceding save around source streams so their graphics state
-        // cannot change our coordinates, color, clipping or line style.
+        // Keep the background's graphics state isolated from source streams.
         let mut content = format!(
-            "Q\nq\n{:.6} {:.6} {:.6} {:.6} re W n\n{r:.8} {g:.8} {b:.8} RG\n{r:.8} {g:.8} {b:.8} rg\n{:.8} w\n0 J 0 j [] 0 d\n",
+            "q\n{:.6} {:.6} {:.6} {:.6} re W n\n{r:.8} {g:.8} {b:.8} RG\n{r:.8} {g:.8} {b:.8} rg\n{:.8} w\n0 J 0 j [] 0 d\n",
             crop.min.x,
             crop.min.y,
             crop.size().width,
@@ -177,7 +176,7 @@ pub(super) fn write(document: &mut PdfDocument, layer: ReferenceLayer) -> Result
         content.push_str("Q\n");
         let mut object = page.object();
         let mut contents = document.new_array()?;
-        contents.array_push(stream(document, "q\n")?)?;
+        contents.array_push(stream(document, &content)?)?;
         if let Some(original) = object.get_dict("Contents")? {
             if original.is_array()? {
                 for item in original.array_iter()? {
@@ -187,7 +186,6 @@ pub(super) fn write(document: &mut PdfDocument, layer: ReferenceLayer) -> Result
                 contents.array_push(original)?;
             }
         }
-        contents.array_push(stream(document, &content)?)?;
         object.dict_put("Contents", contents)?;
     }
     Ok(())

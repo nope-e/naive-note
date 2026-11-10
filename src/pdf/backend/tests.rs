@@ -636,7 +636,7 @@ fn saved_reference_vectors_are_removed_only_from_the_live_render_document() {
 }
 
 #[test]
-fn reopened_display_list_places_references_between_source_and_existing_ink() {
+fn saved_and_live_documents_place_references_below_source_and_existing_ink() {
     // Inspect vector command order only: no pixels, framebuffer, window or image.
     use crate::document::ReferenceLayer;
     use mupdf::{ColorParams, NativeDevice, StrokeState};
@@ -650,6 +650,29 @@ fn reopened_display_list_places_references_between_source_and_existing_ink() {
                 self.0
                     .push(std::array::from_fn(|i| (color[i] * 255.0).round() as u8));
             }
+        }
+
+        fn assert_reference_background(&self, lines: ReferenceLines) {
+            let source = self
+                .0
+                .iter()
+                .position(|color| *color == [51, 153, 204])
+                .unwrap();
+            let reference = self
+                .0
+                .iter()
+                .position(|color| *color == lines.color_rgb)
+                .unwrap();
+            let ink = self
+                .0
+                .iter()
+                .position(|color| *color == [25, 105, 190])
+                .unwrap();
+            assert!(
+                reference < source && source < ink,
+                "vector order: {:?}",
+                self.0
+            );
         }
     }
     impl NativeDevice for Commands {
@@ -708,6 +731,15 @@ fn reopened_display_list_places_references_between_source_and_existing_ink() {
                 document.write_to(&mut result).unwrap();
                 result
             };
+            let saved = PdfDocument::from_bytes(&bytes).unwrap();
+            let page = saved.load_pdf_page(0).unwrap();
+            let commands = Rc::new(RefCell::new(Commands::default()));
+            let device = Device::from_native(Rc::clone(&commands)).unwrap();
+            page.run_contents(&device, &Matrix::IDENTITY).unwrap();
+            page.run_annotations(&device, &Matrix::IDENTITY).unwrap();
+            drop(device);
+            commands.borrow().assert_reference_background(lines);
+
             let mut session = PdfSession::from_bytes(&bytes).unwrap();
             session.use_reference_defaults(lines);
             let commands = Rc::new(RefCell::new(Commands::default()));
@@ -718,27 +750,7 @@ fn reopened_display_list_places_references_between_source_and_existing_ink() {
                 .run(&device, &Matrix::IDENTITY, prepared.bounds)
                 .unwrap();
             drop(device);
-            let commands = commands.borrow();
-            let source = commands
-                .0
-                .iter()
-                .position(|color| *color == [51, 153, 204])
-                .unwrap();
-            let reference = commands
-                .0
-                .iter()
-                .position(|color| *color == lines.color_rgb)
-                .unwrap();
-            let ink = commands
-                .0
-                .iter()
-                .position(|color| *color == [25, 105, 190])
-                .unwrap();
-            assert!(
-                source < reference && reference < ink,
-                "vector order: {:?}",
-                commands.0
-            );
+            commands.borrow().assert_reference_background(lines);
             session.set_reference_lines(ReferenceLines {
                 pattern: ReferencePattern::None,
                 ..lines

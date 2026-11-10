@@ -1,4 +1,4 @@
-//! Reference overlay, after PDF content and before session ink.
+//! Reference background for pages whose PDF bitmap has not arrived yet.
 
 use crate::document::{PageGeometry, Point, Rect, ReferenceLines, ReferenceMark};
 use skia_safe::{Canvas, Color, Paint, Rect as SkRect, paint::Style};

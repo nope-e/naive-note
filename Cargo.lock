@@ -1471,6 +1471,7 @@ dependencies = [
  "raw-window-handle",
  "rfd",
  "serde",
+ "serde_json",
  "sha2",
  "skia-safe",
  "tablet-input-windows",

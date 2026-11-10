@@ -258,7 +258,7 @@ fn draft_serializes_its_original_paper_geometry_and_configurable_background() {
             .unwrap()
             .len()
             .unwrap(),
-        2
+        1
     );
 }
 
@@ -686,7 +686,7 @@ fn reference_vectors_roundtrip_replace_without_duplicates_and_preserve_source_co
                     if pattern == ReferencePattern::None {
                         0
                     } else {
-                        2
+                        1
                     }
                 );
             }
