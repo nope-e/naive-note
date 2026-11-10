@@ -2,6 +2,7 @@
 
 use super::{
     ToolbarAction, ToolbarContext,
+    color_picker::ColorPicker,
     icons::{self, Icon},
     widgets,
 };
@@ -14,6 +15,7 @@ pub(super) fn show(
     ui: &mut egui::Ui,
     open: &mut bool,
     document_tab: &mut bool,
+    color_picker: &mut ColorPicker,
     state: &ToolbarContext<'_>,
     action: &mut Option<ToolbarAction>,
 ) {
@@ -44,7 +46,7 @@ pub(super) fn show(
                     ui.add_space(10.0);
                     ui.add_enabled_ui(state.can_edit_document, |ui| {
                         let mut layer = state.reference_layer;
-                        let mut changed = editor(ui, &mut layer.lines);
+                        let mut changed = ui.push_id("document_reference", |ui| editor(ui, &mut layer.lines, color_picker)).inner;
                         ui.add_space(16.0);
                         changed |= ui.checkbox(&mut layer.embed_in_pdf, "保存时将参考线写入 PDF 页面").changed();
                         ui.label(egui::RichText::new("关闭时仅在应用内叠加；保存仍会记录文档设置。").small().color(theme::MUTED));
@@ -56,7 +58,7 @@ pub(super) fn show(
                     ui.label(egui::RichText::new("用于新建文档和没有参考线元数据的 PDF。已有元数据的文档使用自己的设置。").small().color(theme::MUTED));
                     ui.add_space(10.0);
                     let mut lines = state.settings.reference_lines;
-                    if editor(ui, &mut lines) { *action = Some(ToolbarAction::GlobalReference(lines)); }
+                    if ui.push_id("global_reference", |ui| editor(ui, &mut lines, color_picker)).inner { *action = Some(ToolbarAction::GlobalReference(lines)); }
                     ui.add_space(20.0);
                     ui.separator();
                     widgets::section(ui, "自动保存");
@@ -74,7 +76,7 @@ pub(super) fn show(
         });
 }
 
-fn editor(ui: &mut egui::Ui, lines: &mut ReferenceLines) -> bool {
+fn editor(ui: &mut egui::Ui, lines: &mut ReferenceLines, color_picker: &mut ColorPicker) -> bool {
     let before = *lines;
     ui.label("纹理");
     ui.horizontal_wrapped(|ui| {
@@ -85,7 +87,7 @@ fn editor(ui: &mut egui::Ui, lines: &mut ReferenceLines) -> bool {
     ui.add_space(12.0);
     ui.horizontal(|ui| {
         ui.label("纹理颜色");
-        ui.color_edit_button_srgb(&mut lines.color_rgb);
+        color_picker.button(ui, &mut lines.color_rgb);
     });
     ui.add_space(12.0);
     for (label, value) in [

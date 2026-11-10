@@ -114,7 +114,10 @@ impl WorkspaceToolbar {
                             *action = Some(ToolbarAction::Color(rgb));
                         }
                     }
-                    self.color_picker.button(ui, state.style.color_rgb, action);
+                    let mut color = state.style.color_rgb;
+                    if self.color_picker.button(ui, &mut color).changed() {
+                        *action = Some(ToolbarAction::Color(color));
+                    }
                 });
             },
         );

@@ -71,6 +71,7 @@ pub(super) struct WorkspaceToolbar {
     pages_open: bool,
     focus_mode: bool,
     color_picker: color_picker::ColorPicker,
+    reference_color_picker: color_picker::ColorPicker,
     settings_open: bool,
     settings_document_tab: bool,
 }
@@ -90,6 +91,7 @@ impl WorkspaceToolbar {
             ui,
             &mut self.settings_open,
             &mut self.settings_document_tab,
+            &mut self.reference_color_picker,
             context,
             &mut action,
         );
