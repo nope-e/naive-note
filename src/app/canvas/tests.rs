@@ -9,18 +9,99 @@ use crate::{
 };
 
 fn workspace() -> CanvasWorkspace {
+    let mut workspace = empty_workspace();
+    workspace.apply_transition(DocumentAction::Create(workspace.view.draft_page()));
+    workspace
+}
+
+fn empty_workspace() -> CanvasWorkspace {
     CanvasWorkspace {
         view: CanvasView::draft(),
         area: CanvasArea::default(),
         document: CanvasDocument::with_worker(PdfWorker::new(|_| {}).unwrap()),
         input: CanvasInput::for_editor(),
         toolbar: WorkspaceToolbar::default(),
+        has_document: false,
+        new_document: NewDocumentDialog::default(),
         open_requested: false,
         save_requested: None,
         exit_requested: false,
         transition: DocumentTransition::default(),
         persistence: WorkspacePersistence::default(),
     }
+}
+
+#[test]
+fn welcome_has_no_active_document_and_blocks_ink_navigation_and_save() {
+    let mut workspace = empty_workspace();
+    assert!(!workspace.has_document);
+    assert!(workspace.new_document.open);
+    let viewport = CanvasViewport::new(Rect::new(0., 0., 900., 700.), 1., (900, 700)).unwrap();
+    workspace.view.update_viewport(viewport);
+    let point = viewport.logical.center();
+    let transform = workspace.view.transform;
+    for modifiers in [
+        egui::Modifiers::NONE,
+        egui::Modifiers::CTRL,
+        egui::Modifiers::ALT,
+    ] {
+        assert!(!workspace.mouse_button(true, Some(point), modifiers, false));
+        workspace.mouse_move(Point::new(point.x, point.y + 20.0), modifiers);
+        workspace.mouse_button(false, Some(point), modifiers, false);
+    }
+    assert!(!workspace.input.is_drawing());
+    assert_eq!(workspace.view.transform, transform);
+    assert!(!workspace.document.is_dirty());
+    workspace.request_save(false);
+    assert!(workspace.take_save_request().is_none());
+    workspace.request_exit();
+    assert!(workspace.take_exit_request());
+}
+
+#[test]
+fn creating_uses_the_requested_page_and_closing_returns_to_welcome() {
+    let mut workspace = empty_workspace();
+    let page = PageGeometry::new(Rect::new(0., 0., 1200., 800.), Rotation::R0, 1.).unwrap();
+    workspace.request_transition(DocumentAction::Create(page));
+    assert!(workspace.has_document);
+    assert!(!workspace.new_document.open);
+    assert_eq!(workspace.view.draft_page(), page);
+    assert!(!workspace.view.fit_to_page);
+    assert_eq!(workspace.view.transform.zoom(), 1.0);
+    workspace.request_transition(DocumentAction::Close);
+    assert!(!workspace.has_document);
+    assert!(workspace.new_document.open);
+    assert!(workspace.canvas_blocked());
+}
+
+#[test]
+fn new_document_chooser_preserves_edits_until_creation_is_confirmed() {
+    let mut workspace = workspace();
+    add(&mut workspace);
+    add(&mut workspace);
+    workspace.document.undo();
+    let original_page = workspace.view.draft_page();
+    let page = PageGeometry::new(Rect::new(0., 0., 900., 600.), Rotation::R0, 1.).unwrap();
+    workspace.new_document.open = true;
+    assert!(workspace.document.can_redo());
+    assert!(workspace.canvas_blocked());
+    workspace.request_transition(DocumentAction::Create(page));
+    assert!(workspace.transition.is_pending());
+    assert_eq!(workspace.view.draft_page(), original_page);
+    workspace.transition.resolve(false);
+    assert!(workspace.document.can_redo());
+    // The confirmation's Save must work while the chooser is still open.
+    workspace.request_transition(DocumentAction::Create(page));
+    workspace.transition.wait_for_save();
+    workspace.request_save(false);
+    assert!(workspace.take_save_request().is_some());
+    workspace.save_dialog_result(None);
+    assert!(workspace.transition.is_pending());
+    let action = workspace.transition.resolve(true).unwrap();
+    workspace.apply_transition(action);
+    assert_eq!(workspace.view.draft_page(), page);
+    assert!(!workspace.document.is_dirty());
+    assert!(!workspace.document.can_undo() && !workspace.document.can_redo());
 }
 
 fn add(workspace: &mut CanvasWorkspace) {

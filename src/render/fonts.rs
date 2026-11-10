@@ -22,10 +22,7 @@ pub(super) fn configure(context: &egui::Context) {
                     fonts.families.entry(family).or_default().push(name.clone());
                 }
             }
-            Err(error) => log::warn!(
-                "Cannot load UI fallback font ({}): {error}",
-                path.display()
-            ),
+            Err(error) => log::warn!("Cannot load UI fallback font ({}): {error}", path.display()),
         }
     }
     context.set_fonts(fonts);

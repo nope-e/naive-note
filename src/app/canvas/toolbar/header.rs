@@ -53,15 +53,27 @@ impl WorkspaceToolbar {
                     )),
                     |ui| {
                         ui.horizontal(|ui| {
-                            if icons::button(ui, Icon::Pages, "页面列表", self.pages_open, true)
-                                .clicked()
+                            if icons::button(
+                                ui,
+                                Icon::Pages,
+                                "页面列表",
+                                self.pages_open,
+                                context.has_document && !context.dialog_open,
+                            )
+                            .clicked()
                                 && process_input
                             {
                                 self.pages_open = !self.pages_open;
                                 self.focus_mode = false;
                             }
-                            if icons::button(ui, Icon::Eye, "专注模式", self.focus_mode, true)
-                                .clicked()
+                            if icons::button(
+                                ui,
+                                Icon::Eye,
+                                "专注模式",
+                                self.focus_mode,
+                                context.has_document && !context.dialog_open,
+                            )
+                            .clicked()
                                 && process_input
                             {
                                 self.focus_mode = !self.focus_mode;
@@ -145,8 +157,14 @@ impl WorkspaceToolbar {
                             }
                         }
                         ui.add_space(5.0);
-                        if icons::button(ui, Icon::Settings, "全局设置", self.settings_open, true)
-                            .clicked()
+                        if icons::button(
+                            ui,
+                            Icon::Settings,
+                            "全局设置",
+                            self.settings_open,
+                            !context.dialog_open,
+                        )
+                        .clicked()
                             && process_input
                         {
                             self.settings_open = !self.settings_open;

@@ -2,10 +2,11 @@
 
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) enum DocumentAction {
     Open(PathBuf),
     Recover(PathBuf),
+    Create(crate::document::PageGeometry),
     Close,
     Exit,
 }
@@ -73,6 +74,7 @@ impl DocumentTransition {
         let action = self.pending.as_ref()?;
         let verb = match action {
             DocumentAction::Open(_) | DocumentAction::Recover(_) => "打开其他文档",
+            DocumentAction::Create(_) => "新建文档",
             DocumentAction::Close => "关闭文档",
             DocumentAction::Exit => "退出应用",
         };

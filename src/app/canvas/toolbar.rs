@@ -54,6 +54,8 @@ pub(super) struct DocumentActions {
 
 pub(super) struct ToolbarContext<'a> {
     pub title: &'a str,
+    pub has_document: bool,
+    pub dialog_open: bool,
     pub subtitle: &'a str,
     pub notice: Option<&'a str>,
     pub zoom: f64,
@@ -71,7 +73,6 @@ pub(super) struct WorkspaceToolbar {
     pages_open: bool,
     focus_mode: bool,
     color_picker: color_picker::ColorPicker,
-    reference_color_picker: color_picker::ColorPicker,
     settings_open: bool,
     settings_document_tab: bool,
 }
@@ -87,11 +88,14 @@ impl WorkspaceToolbar {
             .then(|| shortcuts(ui, &context.document))
             .flatten();
         self.header(ui, context, &mut action, process_input);
+        if !context.has_document || context.dialog_open {
+            crate::app::window_frame::show(ui.ctx(), process_input);
+            return action;
+        }
         global_settings::show(
             ui,
             &mut self.settings_open,
             &mut self.settings_document_tab,
-            &mut self.reference_color_picker,
             context,
             &mut action,
         );
@@ -176,7 +180,7 @@ fn shortcuts(ui: &egui::Ui, document: &DocumentActions) -> Option<ToolbarAction>
             Some(ToolbarAction::New)
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::O) {
             Some(ToolbarAction::Open)
-        } else if input.modifiers.ctrl && input.key_pressed(egui::Key::W) {
+        } else if document.can_close && input.modifiers.ctrl && input.key_pressed(egui::Key::W) {
             Some(ToolbarAction::Close)
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::Num0) {
             Some(ToolbarAction::View(ViewAction::Fit))

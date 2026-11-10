@@ -60,6 +60,13 @@ impl CanvasView {
         }
     }
 
+    pub fn blank(page: PageGeometry) -> Self {
+        Self {
+            fit_to_page: false,
+            ..Self::new(vec![page])
+        }
+    }
+
     pub fn new(pages: Vec<PageGeometry>) -> Self {
         Self {
             layout: PageLayout::new(&pages),
