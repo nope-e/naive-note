@@ -31,8 +31,10 @@ pub(super) enum Icon {
     Previous,
     Next,
     Hand,
+    FitPage,
+    FitWidth,
+    ActualSize,
     RotateClockwise,
-    None,
 }
 
 pub(super) fn paint(ui: &egui::Ui, rect: Rect, icon: Icon, color: Color32) {
@@ -62,13 +64,15 @@ pub(super) fn paint(ui: &egui::Ui, rect: Rect, icon: Icon, color: Color32) {
         Icon::Previous => egui::include_image!("../../../../assets/icons/lucide/chevron-left.svg"),
         Icon::Next => egui::include_image!("../../../../assets/icons/lucide/chevron-right.svg"),
         Icon::Hand => egui::include_image!("../../../../assets/icons/lucide/hand.svg"),
+        Icon::FitPage => egui::include_image!("../../../../assets/icons/lucide/maximize.svg"),
+        Icon::FitWidth => egui::include_image!("../../../../assets/icons/lucide/move-horizontal.svg"),
+        Icon::ActualSize => egui::include_image!("../../../../assets/icons/lucide/square-equal.svg"),
         Icon::RotateClockwise => {
             egui::include_image!("../../../../assets/icons/lucide/rotate-cw.svg")
         }
         Icon::Minimize | Icon::Minus => {
             egui::include_image!("../../../../assets/icons/lucide/minus.svg")
         }
-        Icon::None => return,
     };
     // White source strokes allow tinting without keeping a texture per color.
     egui::Image::new(source).tint(color).paint_at(ui, rect);

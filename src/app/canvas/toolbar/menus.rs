@@ -125,12 +125,17 @@ pub(super) fn view_menu(
 ) {
     ui.set_width(216.0);
     widgets::section(ui, "缩放");
-    for (label, shortcut, value) in [
-        ("适合整页", "Ctrl+0", ViewAction::Fit),
-        ("适合宽度", "Ctrl+2", ViewAction::FitWidth),
-        ("实际大小", "Ctrl+1", ViewAction::ActualSize),
+    for (icon, label, shortcut, value) in [
+        (Icon::FitPage, "适合整页", "Ctrl+0", ViewAction::Fit),
+        (Icon::FitWidth, "适合宽度", "Ctrl+2", ViewAction::FitWidth),
+        (
+            Icon::ActualSize,
+            "实际大小",
+            "Ctrl+1",
+            ViewAction::ActualSize,
+        ),
     ] {
-        if widgets::menu_row(ui, Icon::None, label, shortcut, true).clicked() {
+        if widgets::menu_row(ui, icon, label, shortcut, true).clicked() {
             *action = Some(ToolbarAction::View(value));
         }
     }
