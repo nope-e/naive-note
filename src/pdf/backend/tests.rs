@@ -214,9 +214,7 @@ fn worker_refinement_is_superseded_and_preserves_session_after_failed_open() {
         let _ = wait.recv_timeout(Duration::from_secs(5));
     })
     .unwrap();
-    let document = worker
-        .open(path.clone(), crate::document::ReferenceLines::default())
-        .unwrap();
+    let document = worker.open(path.clone()).unwrap();
     assert!(
         matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
         PdfResponse::Opened(response) if response.request == document && response.result.is_ok())
@@ -247,12 +245,7 @@ fn worker_refinement_is_superseded_and_preserves_session_after_failed_open() {
         }
         _ => panic!("expected the latest tile job"),
     }
-    let failed = worker
-        .open(
-            directory.join("missing.pdf"),
-            crate::document::ReferenceLines::default(),
-        )
-        .unwrap();
+    let failed = worker.open(directory.join("missing.pdf")).unwrap();
     release.send(()).unwrap();
     assert!(
         matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
@@ -272,9 +265,7 @@ fn worker_refinement_is_superseded_and_preserves_session_after_failed_open() {
         received.recv_timeout(Duration::from_millis(100)),
         Err(mpsc::RecvTimeoutError::Timeout)
     ));
-    let replacement = worker
-        .open(path.clone(), crate::document::ReferenceLines::default())
-        .unwrap();
+    let replacement = worker.open(path.clone()).unwrap();
     assert!(
         matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
         PdfResponse::Opened(response) if response.request == replacement && response.result.is_ok())
@@ -348,9 +339,7 @@ fn worker_saves_snapshot_and_keeps_the_immutable_preview_session_available() {
         sender.send(response).unwrap();
     })
     .unwrap();
-    let document = worker
-        .open(source.clone(), crate::document::ReferenceLines::default())
-        .unwrap();
+    let document = worker.open(source.clone()).unwrap();
     assert!(
         matches!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), PdfResponse::Opened(response) if response.result.is_ok())
     );
@@ -429,9 +418,7 @@ fn saving_a_closed_session_returns_an_error_without_creating_output() {
         wait.recv_timeout(Duration::from_secs(5)).unwrap();
     })
     .unwrap();
-    let document = worker
-        .open(source.clone(), crate::document::ReferenceLines::default())
-        .unwrap();
+    let document = worker.open(source.clone()).unwrap();
     assert!(
         matches!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), PdfResponse::Opened(response) if response.result.is_ok())
     );
@@ -542,9 +529,7 @@ fn multipage_worker_delivers_incremental_previews_and_close_cancels_the_rest() {
         let _ = wait.recv_timeout(Duration::from_secs(5));
     })
     .unwrap();
-    let document = worker
-        .open(path.clone(), crate::document::ReferenceLines::default())
-        .unwrap();
+    let document = worker.open(path.clone()).unwrap();
     assert!(
         matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
         PdfResponse::Opened(response) if response.result.as_ref().unwrap().pages.len() == 6)
@@ -594,6 +579,48 @@ fn multipage_worker_delivers_incremental_previews_and_close_cancels_the_rest() {
     drop(worker);
     std::fs::remove_file(path).unwrap();
     std::fs::remove_dir(directory).unwrap();
+}
+
+#[test]
+fn pdf_reference_settings_default_to_none_and_restore_saved_document_settings() {
+    use crate::document::ReferenceLayer;
+
+    let source = pdf_bytes("/MediaBox [0 0 200 300]");
+    let session = PdfSession::from_bytes(&source).unwrap();
+    assert_eq!(session.reference_lines.pattern, ReferencePattern::None);
+    for pattern in [
+        ReferencePattern::None,
+        ReferencePattern::Grid,
+        ReferencePattern::Dots,
+    ] {
+        for embed_in_pdf in [false, true] {
+            let layer = ReferenceLayer {
+                lines: ReferenceLines {
+                    pattern,
+                    width: 32.0,
+                    color_rgb: [180, 100, 50],
+                    ..ReferenceLines::default()
+                },
+                embed_in_pdf,
+            };
+            let (bytes, _) = super::super::save::serialize_with_reference(
+                &source,
+                &[],
+                uuid::Uuid::new_v4(),
+                layer,
+            )
+            .unwrap();
+            let session = PdfSession::from_bytes(&bytes).unwrap();
+            assert_eq!(session.reference_lines, layer.lines);
+
+            let document = PdfDocument::from_bytes(&bytes).unwrap();
+            document.catalog().unwrap().dict_delete("Names").unwrap();
+            let mut without_settings = Vec::new();
+            document.write_to(&mut without_settings).unwrap();
+            let session = PdfSession::from_bytes(&without_settings).unwrap();
+            assert_eq!(session.reference_lines.pattern, ReferencePattern::None);
+        }
+    }
 }
 
 #[test]

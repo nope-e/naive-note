@@ -122,36 +122,26 @@ fn queued_opens_are_superseded_and_close_invalidates_pending_work() {
     .unwrap();
     let missing =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".scratch/no-such-pdf-for-worker-test.pdf");
-    let first = worker
-        .open(missing.clone(), crate::document::ReferenceLines::default())
-        .unwrap();
+    let first = worker.open(missing.clone()).unwrap();
     let response = received.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(response.request, first);
     assert!(response.result.is_err());
-    let superseded = worker
-        .open(missing.clone(), crate::document::ReferenceLines::default())
-        .unwrap();
-    let newest = worker
-        .open(missing.clone(), crate::document::ReferenceLines::default())
-        .unwrap();
+    let superseded = worker.open(missing.clone()).unwrap();
+    let newest = worker.open(missing.clone()).unwrap();
     assert_ne!(superseded, newest);
     release.send(()).unwrap();
     let response = received.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(response.request, newest);
 
     // Both commands are queued while the callback above still owns the worker.
-    worker
-        .open(missing.clone(), crate::document::ReferenceLines::default())
-        .unwrap();
+    worker.open(missing.clone()).unwrap();
     worker.close();
     release.send(()).unwrap();
     assert!(matches!(
         received.recv_timeout(Duration::from_millis(100)),
         Err(mpsc::RecvTimeoutError::Timeout)
     ));
-    let reopened = worker
-        .open(missing, crate::document::ReferenceLines::default())
-        .unwrap();
+    let reopened = worker.open(missing).unwrap();
     let response = received.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(response.request, reopened);
     release.send(()).unwrap();

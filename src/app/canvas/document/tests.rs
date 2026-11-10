@@ -324,7 +324,10 @@ fn global_reference_defaults_only_apply_to_new_documents_and_metadata_wins() {
     };
     assert_eq!(doc.reference_layer(), disabled);
     assert!(!doc.reference_uses_global());
-    doc.set_global_reference(ReferenceLines { width: 64.0, ..lines });
+    doc.set_global_reference(ReferenceLines {
+        width: 64.0,
+        ..lines
+    });
     assert_eq!(doc.reference_layer(), disabled);
     assert!(!doc.is_dirty());
     let enabled = ReferenceLayer { lines, ..disabled };
