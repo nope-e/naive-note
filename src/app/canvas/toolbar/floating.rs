@@ -122,7 +122,7 @@ impl WorkspaceToolbar {
             context,
             "pen_properties",
             Align2::RIGHT_CENTER,
-            vec2(-18.0, 12.0),
+            vec2(-18.0 - if self.settings_open { 320.0 } else { 0.0 }, 12.0),
             |ui| {
                 ui.set_width(34.0);
                 ui.set_height((context.content_rect().height() - 200.0).clamp(260.0, 390.0));

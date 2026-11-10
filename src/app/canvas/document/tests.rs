@@ -21,6 +21,8 @@ fn fixture_pdf() -> LoadedPdf {
             geometry,
             bounds: Rect::new(0.0, 0.0, 600.0, 800.0),
         }),
+        reference_lines: None,
+        rendered_reference_lines: ReferenceLines::default(),
         edit_data_status: "Existing annotations in immutable base".to_owned(),
         fingerprint: crate::storage::FileFingerprint::of(b"fixture"),
     }
@@ -285,4 +287,117 @@ fn discard_queues_cleanup_after_an_inflight_draft_save_and_ignores_its_late_resp
     assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
     drop(document);
     fs::remove_dir(root).unwrap();
+}
+
+#[test]
+fn reference_defaults_follow_global_until_save_and_existing_metadata_wins() {
+    use crate::document::ReferencePattern;
+    let mut doc = document();
+    let lines = ReferenceLines {
+        pattern: ReferencePattern::Dots,
+        width: 32.0,
+        ..ReferenceLines::default()
+    };
+    doc.set_global_reference(lines);
+    assert_eq!(
+        doc.reference_layer(),
+        ReferenceLayer {
+            lines,
+            embed_in_pdf: true
+        }
+    );
+    assert!(!doc.is_dirty());
+    doc.pending = Some(50);
+    doc.opened(OpenResponse {
+        request: 50,
+        result: Ok(fixture_pdf()),
+    });
+    assert_eq!(
+        doc.reference_layer(),
+        ReferenceLayer {
+            lines,
+            embed_in_pdf: false
+        }
+    );
+    assert!(doc.reference_uses_global());
+    let metadata = ReferenceLayer {
+        lines: ReferenceLines::default(),
+        embed_in_pdf: true,
+    };
+    let mut pdf = fixture_pdf();
+    pdf.reference_lines = Some(metadata);
+    doc.pending = Some(51);
+    doc.opened(OpenResponse {
+        request: 51,
+        result: Ok(pdf),
+    });
+    doc.set_global_reference(lines);
+    assert_eq!(doc.reference_layer(), metadata);
+    assert!(!doc.reference_uses_global());
+    doc.close();
+    assert_eq!(
+        doc.reference_layer(),
+        ReferenceLayer {
+            lines,
+            embed_in_pdf: true
+        }
+    );
+}
+
+#[test]
+fn saved_reference_edits_remain_undoable_and_new_edits_stay_dirty() {
+    let mut doc = document();
+    let original = doc.reference_layer();
+    let mut changed = original;
+    changed.lines.width = 32.0;
+    doc.set_reference_layer(changed);
+    let saved_revision = doc.revision().current;
+    doc.pending_save = Some((100, saved_revision));
+    doc.saving.reference_lines = Some(changed);
+    let mut newer = changed;
+    newer.embed_in_pdf = false;
+    doc.set_reference_layer(newer);
+    doc.saved(crate::pdf::SaveResponse {
+        document: None,
+        request: 100,
+        revision: saved_revision,
+        result: Ok(crate::pdf::SavedPdf {
+            path: "saved.pdf".into(),
+            fingerprint: crate::storage::FileFingerprint::of(b"saved"),
+        }),
+    });
+    assert_eq!(doc.reference_layer(), newer);
+    assert!(doc.is_dirty());
+    doc.undo();
+    assert_eq!(doc.reference_layer(), changed);
+    assert!(!doc.is_dirty());
+    doc.undo();
+    assert_eq!(doc.reference_layer(), original);
+    assert!(doc.is_dirty());
+    doc.redo();
+    assert_eq!(doc.reference_layer(), changed);
+    assert!(!doc.is_dirty());
+}
+
+#[test]
+fn first_successful_save_freezes_the_snapshot_instead_of_later_global_defaults() {
+    let mut doc = document();
+    let snapshot = doc.reference_layer();
+    doc.pending_save = Some((100, 0));
+    doc.saving.reference_lines = Some(snapshot);
+    doc.set_global_reference(ReferenceLines {
+        width: 64.0,
+        ..ReferenceLines::default()
+    });
+    doc.saved(crate::pdf::SaveResponse {
+        document: None,
+        request: 100,
+        revision: 0,
+        result: Ok(crate::pdf::SavedPdf {
+            path: "saved.pdf".into(),
+            fingerprint: crate::storage::FileFingerprint::of(b"saved"),
+        }),
+    });
+    assert_eq!(doc.reference_layer(), snapshot);
+    assert!(!doc.reference_uses_global());
 }

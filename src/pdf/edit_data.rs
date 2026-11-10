@@ -4,7 +4,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::document::StrokeRecord;
+use crate::document::{ReferenceLayer, StrokeRecord};
 
 pub(super) const FORMAT_VERSION: u32 = 1;
 pub(super) const MAX_EDIT_BYTES: usize = 8 * 1024 * 1024;
@@ -20,6 +20,8 @@ pub(super) struct EditData {
     pub format_version: u32,
     pub document_id: Uuid,
     pub strokes: Vec<SavedStroke>,
+    #[serde(default)]
+    pub reference_lines: Option<ReferenceLayer>,
 }
 
 impl EditData {
@@ -65,6 +67,9 @@ impl EditData {
             data.format_version
         );
         ensure!(!data.document_id.is_nil(), "Invalid document UUID");
+        if let Some(layer) = data.reference_lines {
+            layer.lines.validate()?;
+        }
         Ok(data)
     }
 }

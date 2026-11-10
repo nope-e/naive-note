@@ -7,11 +7,15 @@ use std::{
 
 use uuid::Uuid;
 
-use super::StrokeRecord;
+use super::{ReferenceLayer, StrokeRecord};
 
 #[derive(Clone, Debug)]
 pub enum EditCommand {
     AddStroke(Arc<StrokeRecord>),
+    ReferenceLines {
+        before: Option<ReferenceLayer>,
+        after: ReferenceLayer,
+    },
 }
 
 /// Identities name content states, not history depths. Undo/redo return to the
@@ -42,6 +46,7 @@ pub struct EditHistory {
     redo: Vec<HistoryEntry>,
     revision: DocumentRevision,
     last_revision: u64,
+    pub reference_lines: Option<ReferenceLayer>,
 }
 
 impl EditHistory {
@@ -71,9 +76,12 @@ impl EditHistory {
 
     /// A repeated submission cannot duplicate ink or destroy the redo branch.
     pub fn execute(&mut self, command: EditCommand) -> bool {
-        let EditCommand::AddStroke(stroke) = &command;
-        if self.stroke_ids.contains(&stroke.id) {
-            return false;
+        match &command {
+            EditCommand::AddStroke(stroke) if self.stroke_ids.contains(&stroke.id) => return false,
+            EditCommand::ReferenceLines { after, .. } if self.reference_lines == Some(*after) => {
+                return false;
+            }
+            _ => {}
         }
         let next = self
             .last_revision
@@ -95,19 +103,23 @@ impl EditHistory {
         let Some(entry) = self.undo.pop() else {
             return false;
         };
-        let EditCommand::AddStroke(stroke) = &entry.command;
-        let page = self
-            .strokes
-            .get_mut(&stroke.page_index)
-            .expect("stroke page");
-        // AddStroke is currently the only command, so this is the last stroke
-        // on its page even when the global history spans multiple pages.
-        let removed = page.pop().expect("history stroke");
-        debug_assert_eq!(removed.id, stroke.id);
-        if page.is_empty() {
-            self.strokes.remove(&stroke.page_index);
+        match &entry.command {
+            EditCommand::ReferenceLines { before, .. } => self.reference_lines = *before,
+            EditCommand::AddStroke(stroke) => {
+                let page = self
+                    .strokes
+                    .get_mut(&stroke.page_index)
+                    .expect("stroke page");
+                // History order makes this the last stroke on its page even
+                // when intervening commands changed reference lines or other pages.
+                let removed = page.pop().expect("history stroke");
+                debug_assert_eq!(removed.id, stroke.id);
+                if page.is_empty() {
+                    self.strokes.remove(&stroke.page_index);
+                }
+                self.stroke_ids.remove(&stroke.id);
+            }
         }
-        self.stroke_ids.remove(&stroke.id);
         self.revision.current = entry.before;
         self.redo.push(entry);
         true
@@ -124,12 +136,16 @@ impl EditHistory {
     }
 
     fn apply(&mut self, command: &EditCommand) {
-        let EditCommand::AddStroke(stroke) = command;
-        self.stroke_ids.insert(stroke.id);
-        self.strokes
-            .entry(stroke.page_index)
-            .or_default()
-            .push(Arc::clone(stroke));
+        match command {
+            EditCommand::ReferenceLines { after, .. } => self.reference_lines = Some(*after),
+            EditCommand::AddStroke(stroke) => {
+                self.stroke_ids.insert(stroke.id);
+                self.strokes
+                    .entry(stroke.page_index)
+                    .or_default()
+                    .push(Arc::clone(stroke));
+            }
+        }
     }
 
     /// Step 8 calls this only after the snapshot's save transaction succeeds.

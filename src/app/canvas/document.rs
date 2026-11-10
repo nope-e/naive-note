@@ -11,7 +11,10 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     app::UserEvent,
-    document::{DocumentRevision, EditCommand, EditHistory, PageGeometry, StrokeRecord},
+    document::{
+        DocumentRevision, EditCommand, EditHistory, PageGeometry, ReferenceLayer, ReferenceLines,
+        StrokeRecord,
+    },
     pdf::{LoadedPdf, OpenResponse, PdfResponse, PdfWorker},
     render::CanvasScene,
 };
@@ -35,6 +38,8 @@ pub(super) struct CanvasDocument {
     saved_target: Option<(PathBuf, crate::storage::FileFingerprint)>,
     document_id: uuid::Uuid,
     saving: saving::SavingState,
+    global_reference: ReferenceLines,
+    reference_metadata: Option<ReferenceLayer>,
 }
 
 impl CanvasDocument {
@@ -58,6 +63,8 @@ impl CanvasDocument {
             saved_target: None,
             document_id: uuid::Uuid::new_v4(),
             saving: saving::SavingState::default(),
+            global_reference: ReferenceLines::default(),
+            reference_metadata: None,
         }
     }
 
@@ -76,7 +83,7 @@ impl CanvasDocument {
         if let Some(loaded) = self.loaded.as_mut() {
             loaded.preview.cancel(&self.worker);
         }
-        match self.worker.open(path) {
+        match self.worker.open(path, self.global_reference) {
             Ok(request) => {
                 self.pending = Some(request);
                 self.message = Some("Loading PDF...".to_owned());
@@ -119,6 +126,7 @@ impl CanvasDocument {
                 self.discard_recovery_except(recovering.as_deref());
                 self.saving.reset();
                 self.edits = EditHistory::default();
+                self.reference_metadata = pdf.reference_lines;
                 self.pending_save = None;
                 self.saved_target = if recovering.is_some() {
                     self.saving.copy = Some((pdf.path.clone(), Some(pdf.fingerprint)));
@@ -134,7 +142,11 @@ impl CanvasDocument {
                     pdf.path.display(),
                     pdf.edit_data_status,
                 ));
-                let preview = PdfPreview::new(response.request, Arc::clone(&pdf.first_page));
+                let preview = PdfPreview::new(
+                    response.request,
+                    Arc::clone(&pdf.first_page),
+                    pdf.rendered_reference_lines,
+                );
                 self.loaded = Some(OpenDocument { pdf, preview });
                 self.loaded_request = Some(response.request);
                 Some(pages)
@@ -156,6 +168,7 @@ impl CanvasDocument {
         self.notice = None;
         self.loaded_request = None;
         self.edits = EditHistory::default();
+        self.reference_metadata = None;
         self.pending_save = None;
         self.saved_target = None;
         self.document_id = uuid::Uuid::new_v4();
@@ -164,6 +177,37 @@ impl CanvasDocument {
 
     pub fn can_ink(&self) -> bool {
         self.pending.is_none()
+    }
+
+    pub fn set_global_reference(&mut self, lines: ReferenceLines) {
+        self.global_reference = lines;
+    }
+
+    pub fn reference_layer(&self) -> ReferenceLayer {
+        self.edits
+            .reference_lines
+            .or(self.reference_metadata)
+            .unwrap_or(ReferenceLayer {
+                lines: self.global_reference,
+                embed_in_pdf: !self.is_loaded(),
+            })
+    }
+
+    pub fn reference_uses_global(&self) -> bool {
+        self.edits.reference_lines.is_none() && self.reference_metadata.is_none()
+    }
+
+    pub fn set_reference_layer(&mut self, layer: ReferenceLayer) {
+        if self.can_ink()
+            && layer.lines.validate().is_ok()
+            && layer != self.reference_layer()
+            && self.edits.execute(EditCommand::ReferenceLines {
+                before: Some(self.reference_layer()),
+                after: layer,
+            })
+        {
+            self.edit_changed();
+        }
     }
 
     pub fn add_stroke(&mut self, stroke: Arc<StrokeRecord>) {
@@ -331,8 +375,10 @@ impl CanvasDocument {
         scene: &mut CanvasScene,
         current_page: u32,
     ) {
+        let reference_lines = self.reference_layer().lines;
         for page in &mut scene.pages {
             page.strokes = self.edits.strokes(page.index).to_vec();
+            page.reference_lines = reference_lines;
         }
         if let Some(loaded) = self.loaded.as_mut() {
             loaded.preview.update(
@@ -341,6 +387,7 @@ impl CanvasDocument {
                 scene,
                 current_page,
                 self.pending.is_some(),
+                reference_lines,
             );
         }
     }

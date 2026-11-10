@@ -28,6 +28,7 @@ pub(super) struct SavingState {
     pub restored: bool,
     pub paused: bool,
     pub recovering: Option<PathBuf>,
+    pub(super) reference_lines: Option<crate::document::ReferenceLayer>,
 }
 
 impl SavingState {
@@ -116,12 +117,14 @@ impl CanvasDocument {
             revision,
             strokes: self.edits.snapshot(),
             draft_page,
+            reference_lines: self.reference_layer(),
             document_id: self.document_id,
             path: path.clone(),
             require_new_target: kind == SaveKind::AutoDraft && tracked_target.is_none(),
             tracked_target,
         };
         self.saving.kind = kind;
+        self.saving.reference_lines = Some(snapshot.reference_lines);
         self.saving.destination = Some(path);
         if kind == SaveKind::Manual {
             self.notice = None;
@@ -144,6 +147,8 @@ impl CanvasDocument {
         self.pending_save = None;
         match response.result {
             Ok(saved) => {
+                // Use the actual snapshot even if defaults changed during saving.
+                self.reference_metadata = self.saving.reference_lines;
                 self.saving.paused = false;
                 self.notice = None;
                 if self.saving.kind == SaveKind::AutoDraft {

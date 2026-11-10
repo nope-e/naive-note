@@ -11,7 +11,7 @@ use super::{
     icons::{self, Icon},
 };
 
-const WINDOW_CONTROLS_WIDTH: f32 = 156.0;
+const WINDOW_CONTROLS_WIDTH: f32 = 192.0;
 
 impl WorkspaceToolbar {
     pub(super) fn header(
@@ -145,6 +145,12 @@ impl WorkspaceToolbar {
                             }
                         }
                         ui.add_space(5.0);
+                        if icons::button(ui, Icon::Settings, "全局设置", self.settings_open, true)
+                            .clicked()
+                            && process_input
+                        {
+                            self.settings_open = !self.settings_open;
+                        }
                         let menu = icons::button(ui, Icon::Menu, "菜单", false, true);
                         egui::Popup::menu(&menu)
                             .frame(theme::popup_frame())

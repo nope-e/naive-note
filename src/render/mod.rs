@@ -35,6 +35,7 @@ pub struct PageScene {
     pub strokes: Vec<Arc<crate::document::StrokeRecord>>,
     pub active_stroke: Option<crate::ink::ActiveInk>,
     pub draft_paper: bool,
+    pub reference_lines: crate::document::ReferenceLines,
 }
 
 pub struct Renderer {

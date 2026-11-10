@@ -6,7 +6,7 @@ use mupdf::{
     pdf::{PdfDocument, PdfPage},
 };
 
-use crate::document::{PageGeometry, Rect, Rotation};
+use crate::document::{PageGeometry, Rect, ReferenceLines, ReferencePattern, Rotation};
 
 use super::{
     LoadedPdf, PAGE_CACHE_BYTES, PageBitmap, PageTile, TileKey,
@@ -24,6 +24,7 @@ pub(super) struct PdfSession {
     document: PdfDocument,
     pages: Vec<PageGeometry>,
     prepared: VecDeque<PreparedPage>,
+    reference_lines: ReferenceLines,
 }
 
 struct PreparedPage {
@@ -59,6 +60,9 @@ impl PdfSession {
             "Password-protected PDFs are not supported yet"
         );
         ensure!(document.page_count()? > 0, "PDF has no pages");
+        // Our saved reference vectors are displayed as a live overlay instead.
+        // Keep `base` intact for lossless source preservation during saves.
+        super::reference_lines::remove(&document)?;
         let mut pages = Vec::new();
         for index in 0..document.page_count()? {
             let page = PdfPage::try_from(document.load_page(index)?)
@@ -70,11 +74,31 @@ impl PdfSession {
             document,
             pages,
             prepared: VecDeque::new(),
+            reference_lines: ReferenceLines {
+                pattern: ReferencePattern::None,
+                ..ReferenceLines::default()
+            },
         })
     }
 
     pub fn base(&self) -> &[u8] {
         &self.base
+    }
+
+    pub fn use_reference_defaults(&mut self, defaults: ReferenceLines) {
+        let lines = super::save::read_edit_data(&self.document)
+            .ok()
+            .flatten()
+            .and_then(|data| data.reference_lines)
+            .map_or(defaults, |layer| layer.lines);
+        self.set_reference_lines(lines);
+    }
+
+    pub fn set_reference_lines(&mut self, lines: ReferenceLines) {
+        if self.reference_lines != lines {
+            self.reference_lines = lines;
+            self.prepared.clear();
+        }
     }
 
     #[cfg(test)]
@@ -88,6 +112,11 @@ impl PdfSession {
             page_count: self.pages.len() as u32,
             pages: self.pages.clone(),
             edit_data_status: super::save::edit_data_status(&self.document),
+            reference_lines: super::save::read_edit_data(&self.document)
+                .ok()
+                .flatten()
+                .and_then(|data| data.reference_lines),
+            rendered_reference_lines: self.reference_lines,
             fingerprint: crate::storage::FileFingerprint::of(&self.base),
             first_page: Arc::new(self.render_preview(0)?),
         })
@@ -104,9 +133,13 @@ impl PdfSession {
         } else {
             let page = PdfPage::try_from(self.document.load_page(index as i32)?)?;
             let bounds = page.bounds()?;
-            let display_list = page
-                .to_display_list(true)
-                .context("Cannot prepare PDF page")?;
+            let mut display_list = DisplayList::new(bounds)?;
+            let device = Device::from_display_list(&mut display_list)?;
+            page.run_contents(&device, &Matrix::IDENTITY)?;
+            super::reference_lines::record(&device, &page, self.reference_lines)?;
+            page.run_annotations(&device, &Matrix::IDENTITY)?;
+            page.run_widgets(&device, &Matrix::IDENTITY)?;
+            drop(device);
             // A small LRU bounds the number of engine display lists, independent
             // of document length. Pixel caches have their own byte budgets.
             if self.prepared.len() == 4 {

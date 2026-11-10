@@ -9,6 +9,7 @@ use std::{
     time::Instant,
 };
 
+use crate::document::ReferenceLines;
 use anyhow::{Context, Result};
 
 use super::{
@@ -20,12 +21,14 @@ enum Command {
     Open {
         request: u64,
         path: PathBuf,
+        reference_defaults: ReferenceLines,
     },
     Render {
         document: u64,
         request: u64,
         pages: Vec<u32>,
         keys: Vec<TileKey>,
+        reference_lines: ReferenceLines,
     },
     Close,
     Save {
@@ -60,7 +63,11 @@ impl PdfWorker {
                 let mut session = None;
                 while let Ok(command) = receiver.recv() {
                     match command {
-                        Command::Open { request, path } => {
+                        Command::Open {
+                            request,
+                            path,
+                            reference_defaults,
+                        } => {
                             if request != worker_latest.load(Ordering::Acquire) {
                                 continue;
                             }
@@ -68,6 +75,7 @@ impl PdfWorker {
                                 if request != worker_latest.load(Ordering::Acquire) {
                                     return Ok(None);
                                 }
+                                opened.use_reference_defaults(reference_defaults);
                                 let preview = opened.preview(&path)?;
                                 Ok(Some((opened, preview)))
                             });
@@ -92,6 +100,7 @@ impl PdfWorker {
                             request,
                             pages,
                             keys,
+                            reference_lines,
                         } => {
                             if request != worker_render.load(Ordering::Acquire) {
                                 continue;
@@ -102,6 +111,7 @@ impl PdfWorker {
                             if *id != document {
                                 continue;
                             }
+                            opened.set_reference_lines(reference_lines);
                             // Deliver each completed item so a complex later page
                             // cannot delay already available visible content.
                             let count = pages.len() + keys.len();
@@ -200,11 +210,15 @@ impl PdfWorker {
         })
     }
 
-    pub fn open(&self, path: PathBuf) -> Result<u64> {
+    pub fn open(&self, path: PathBuf, reference_defaults: ReferenceLines) -> Result<u64> {
         self.cancel_render();
         let request = self.invalidate();
         self.sender
-            .send(Command::Open { request, path })
+            .send(Command::Open {
+                request,
+                path,
+                reference_defaults,
+            })
             .context("MuPDF worker stopped")?;
         Ok(request)
     }
@@ -217,10 +231,16 @@ impl PdfWorker {
 
     #[cfg(test)]
     pub fn render(&self, document: u64, keys: Vec<TileKey>) -> Result<u64> {
-        self.render_pages(document, Vec::new(), keys)
+        self.render_pages(document, Vec::new(), keys, ReferenceLines::default())
     }
 
-    pub fn render_pages(&self, document: u64, pages: Vec<u32>, keys: Vec<TileKey>) -> Result<u64> {
+    pub fn render_pages(
+        &self,
+        document: u64,
+        pages: Vec<u32>,
+        keys: Vec<TileKey>,
+        reference_lines: ReferenceLines,
+    ) -> Result<u64> {
         let request = self.cancel_render();
         self.sender
             .send(Command::Render {
@@ -228,6 +248,7 @@ impl PdfWorker {
                 request,
                 pages,
                 keys,
+                reference_lines,
             })
             .context("MuPDF worker stopped")?;
         Ok(request)
@@ -283,7 +304,12 @@ fn save_snapshot(snapshot: &SaveSnapshot, session: Option<&(u64, PdfSession)>) -
         draft = super::save::draft_pdf(snapshot.draft_page)?;
         &draft
     };
-    let (bytes, data) = super::save::serialize(base, &snapshot.strokes, snapshot.document_id)?;
+    let (bytes, data) = super::save::serialize_with_reference(
+        base,
+        &snapshot.strokes,
+        snapshot.document_id,
+        snapshot.reference_lines,
+    )?;
     let fingerprint = storage::save_atomic(&snapshot.path, expected, &bytes, |path| {
         let disk = super::save::read_pdf(path)?;
         anyhow::ensure!(

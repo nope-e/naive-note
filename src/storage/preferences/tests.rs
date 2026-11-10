@@ -118,3 +118,39 @@ fn startup_survives_bad_settings_lists_only_owned_drafts_and_flushes_latest_sett
         latest
     );
 }
+
+#[test]
+fn old_settings_receive_reference_defaults_and_new_defaults_survive_roundtrip() {
+    #[derive(serde::Serialize)]
+    struct OldSettings {
+        version: u32,
+        autosave_seconds: u64,
+    }
+    let mut bytes = Vec::new();
+    ciborium::into_writer(
+        &OldSettings {
+            version: 1,
+            autosave_seconds: 7,
+        },
+        &mut bytes,
+    )
+    .unwrap();
+    let settings: Settings = ciborium::from_reader(bytes.as_slice()).unwrap();
+    assert_eq!(
+        settings.reference_lines,
+        crate::document::ReferenceLines::default()
+    );
+    let directory = Directory::new();
+    let path = directory.0.join("settings.cbor");
+    let changed = Settings {
+        reference_lines: crate::document::ReferenceLines {
+            pattern: crate::document::ReferencePattern::None,
+            width: 32.0,
+            color_rgb: [120, 140, 160],
+            ..settings.reference_lines
+        },
+        ..settings
+    };
+    write_settings(&path, &changed).unwrap();
+    assert_eq!(read_settings(&path).unwrap(), changed);
+}

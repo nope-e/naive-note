@@ -11,7 +11,7 @@ use mupdf::{
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::document::{PageGeometry, PathCommand, Point, StrokeRecord};
+use crate::document::{PageGeometry, PathCommand, Point, ReferenceLayer, StrokeRecord};
 
 use super::{
     backend::page_geometry,
@@ -125,10 +125,11 @@ fn add_stroke(document: &mut PdfDocument, stroke: &StrokeRecord) -> Result<Saved
 
 /// Serialize only the current session strokes over the original immutable PDF.
 /// Invalid private metadata is replaced; all actual PDF annotations are retained.
-pub(super) fn serialize(
+pub(super) fn serialize_with_reference(
     base: &[u8],
     strokes: &[std::sync::Arc<StrokeRecord>],
     document_id: Uuid,
+    reference_lines: ReferenceLayer,
 ) -> Result<(Vec<u8>, EditData)> {
     let mut document = PdfDocument::from_bytes(base)?;
     ensure_writable(&document)?;
@@ -141,7 +142,10 @@ pub(super) fn serialize(
             format_version: FORMAT_VERSION,
             document_id,
             strokes: Vec::new(),
+            reference_lines: None,
         });
+    data.reference_lines = Some(reference_lines);
+    super::reference_lines::write(&mut document, reference_lines)?;
     let mut ids: HashSet<_> = data.strokes.iter().map(|s| s.stroke.id).collect();
     // Also reserve UUIDs of standard annotations whose metadata was discarded.
     for index in 0..document.page_count()? {
@@ -237,7 +241,7 @@ fn remove_edit_attachments(document: &PdfDocument) -> Result<()> {
     Ok(())
 }
 
-/// Persist the draft's squared paper as ordinary PDF page content.
+/// Create blank paper; reference vectors are serialized from document settings.
 pub(super) fn draft_pdf(geometry: PageGeometry) -> Result<Vec<u8>> {
     let mut document = PdfDocument::new();
     let crop = geometry.crop_box();
@@ -250,33 +254,6 @@ pub(super) fn draft_pdf(geometry: PageGeometry) -> Result<Vec<u8>> {
     object.dict_put(
         "UserUnit",
         PdfObject::new_real(geometry.user_unit() as f32)?,
-    )?;
-    let size = geometry.unrotated_size();
-    let unit = geometry.user_unit();
-    let mut content = format!(
-        "q\n0.8627451 0.9215686 0.9921569 RG\n{:.8} w\n",
-        0.45 / unit
-    );
-    for i in 1..=(size.width / 18.0) as u32 {
-        let x = crop.min.x + f64::from(i) * 18.0 / unit;
-        writeln!(
-            content,
-            "{x:.6} {:.6} m {x:.6} {:.6} l",
-            crop.min.y, crop.max.y
-        )?;
-    }
-    for i in 1..=(size.height / 18.0) as u32 {
-        let y = crop.max.y - f64::from(i) * 18.0 / unit;
-        writeln!(
-            content,
-            "{:.6} {y:.6} m {:.6} {y:.6} l",
-            crop.min.x, crop.max.x
-        )?;
-    }
-    content.push_str("S\nQ\n");
-    object.dict_put(
-        "Contents",
-        document.add_stream(&Buffer::from_bytes(content.as_bytes())?, None, false)?,
     )?;
     let mut bytes = Vec::new();
     document.write_to(&mut bytes)?;

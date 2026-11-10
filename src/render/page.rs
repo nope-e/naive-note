@@ -106,8 +106,9 @@ pub(super) fn draw(
             );
             canvas.restore();
         }
-    } else if scene.draft_paper {
-        draft_paper::draw_contents(canvas, scene.source_page);
+    }
+    if scene.bitmap.is_none() {
+        draft_paper::draw_contents(canvas, scene.source_page, scene.reference_lines);
     }
     for stroke in &scene.strokes {
         draw_stroke(canvas, stroke);

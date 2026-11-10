@@ -3,6 +3,7 @@
 mod backend;
 mod cache;
 mod edit_data;
+mod reference_lines;
 mod save;
 mod tiles;
 mod worker;
@@ -10,7 +11,7 @@ mod worker;
 use std::{path::PathBuf, sync::Arc};
 
 use crate::{
-    document::{PageGeometry, Rect, StrokeRecord},
+    document::{PageGeometry, Rect, ReferenceLayer, StrokeRecord},
     storage::FileFingerprint,
 };
 
@@ -38,6 +39,8 @@ pub struct LoadedPdf {
     pub pages: Vec<PageGeometry>,
     pub first_page: Arc<PageBitmap>,
     pub edit_data_status: String,
+    pub reference_lines: Option<ReferenceLayer>,
+    pub rendered_reference_lines: crate::document::ReferenceLines,
     pub fingerprint: FileFingerprint,
 }
 
@@ -46,6 +49,7 @@ pub struct SaveSnapshot {
     pub revision: u64,
     pub strokes: Vec<Arc<StrokeRecord>>,
     pub draft_page: PageGeometry,
+    pub reference_lines: ReferenceLayer,
     pub document_id: uuid::Uuid,
     pub path: PathBuf,
     /// Most recent successful save, or the file bytes at open time.

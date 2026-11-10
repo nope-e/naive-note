@@ -280,9 +280,12 @@ impl CanvasWorkspace {
                     tool: self.input.tool,
                     mouse_pen: self.input.mouse_pen,
                     smoothing: self.input.smoothing,
-                    autosave_seconds: self.persistence.settings.autosave_seconds,
                     recovery_count: self.persistence.drafts.len(),
                 },
+                settings: &self.persistence.settings,
+                reference_layer: self.document.reference_layer(),
+                reference_uses_global: self.document.reference_uses_global(),
+                can_edit_document: self.document.can_ink(),
             },
             interact,
         );
@@ -308,6 +311,20 @@ impl CanvasWorkspace {
                 self.input.cancel_drawing();
             }
             match action {
+                Some(ToolbarAction::New) => {
+                    self.request_transition(DocumentAction::Close);
+                    action = None;
+                }
+                Some(ToolbarAction::GlobalReference(lines)) => {
+                    self.persistence.settings.reference_lines = lines;
+                    self.document.set_global_reference(lines);
+                    self.persist_settings();
+                    action = None;
+                }
+                Some(ToolbarAction::DocumentReference(layer)) => {
+                    self.document.set_reference_layer(layer);
+                    action = None;
+                }
                 Some(ToolbarAction::Save) => {
                     self.request_save(false);
                     action = None;

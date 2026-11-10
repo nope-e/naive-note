@@ -26,10 +26,15 @@ pub(super) struct PdfPreview {
     pending: Option<u64>,
     due: Instant,
     failed: HashSet<u32>,
+    reference_lines: crate::document::ReferenceLines,
 }
 
 impl PdfPreview {
-    pub fn new(document: u64, first_page: Arc<PageBitmap>) -> Self {
+    pub fn new(
+        document: u64,
+        first_page: Arc<PageBitmap>,
+        reference_lines: crate::document::ReferenceLines,
+    ) -> Self {
         let mut page_cache = ByteLru::new(PAGE_CACHE_BYTES);
         page_cache.insert(0, first_page, |page| page.rgba.len());
         Self {
@@ -41,6 +46,7 @@ impl PdfPreview {
             pending: None,
             due: Instant::now(),
             failed: HashSet::new(),
+            reference_lines,
         }
     }
 
@@ -81,7 +87,15 @@ impl PdfPreview {
         scene: &mut CanvasScene,
         current_page: u32,
         loading: bool,
+        reference_lines: crate::document::ReferenceLines,
     ) {
+        if self.reference_lines != reference_lines {
+            self.cancel(worker);
+            self.reference_lines = reference_lines;
+            self.page_cache = ByteLru::new(PAGE_CACHE_BYTES);
+            self.tile_cache = ByteLru::new(TILE_CACHE_BYTES);
+            self.failed.clear();
+        }
         let mut pages: Vec<_> = scene.pages.iter().map(|page| page.index).collect();
         pages.sort_by_key(|page| page.abs_diff(current_page));
         let mut visible = Vec::new();
@@ -134,7 +148,7 @@ impl PdfPreview {
             if now < self.due {
                 context.request_repaint_after(self.due - now);
             } else {
-                match worker.render_pages(self.document, missing_pages, missing) {
+                match worker.render_pages(self.document, missing_pages, missing, reference_lines) {
                     Ok(request) => self.pending = Some(request),
                     Err(error) => {
                         log::warn!("Cannot request PDF pages: {error:#}");
@@ -182,7 +196,11 @@ mod tests {
     #[test]
     fn stale_results_are_ignored_and_partial_batches_keep_their_request() {
         let image = bitmap(Arc::from([]));
-        let mut preview = PdfPreview::new(10, Arc::clone(&image));
+        let mut preview = PdfPreview::new(
+            10,
+            Arc::clone(&image),
+            crate::document::ReferenceLines::default(),
+        );
         preview.pending = Some(20);
         preview
             .receive(response(9, 20, 1, Arc::clone(&image), true))
@@ -206,7 +224,11 @@ mod tests {
     fn page_cache_evicts_old_pages_within_the_shared_byte_budget() {
         // Shared test storage checks accounting without allocating 64 MiB.
         let image = bitmap(vec![0; 1024 * 1024].into());
-        let mut preview = PdfPreview::new(10, Arc::clone(&image));
+        let mut preview = PdfPreview::new(
+            10,
+            Arc::clone(&image),
+            crate::document::ReferenceLines::default(),
+        );
         for page in 1..64 {
             preview.pending = Some(20);
             preview

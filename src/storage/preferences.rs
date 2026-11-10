@@ -13,7 +13,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::document::PenStyle;
+use crate::document::{PenStyle, ReferenceLines};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -25,6 +25,7 @@ pub struct Settings {
     pub pressure_gamma: f64,
     pub smoothing: bool,
     pub mouse_pen: bool,
+    pub reference_lines: ReferenceLines,
 }
 
 impl Default for Settings {
@@ -37,12 +38,14 @@ impl Default for Settings {
             pressure_gamma: PenStyle::default().pressure_gamma,
             smoothing: true,
             mouse_pen: true,
+            reference_lines: ReferenceLines::default(),
         }
     }
 }
 
 impl Settings {
     fn validate(&self) -> Result<()> {
+        self.reference_lines.validate()?;
         ensure!(self.version == 1, "不支持的设置版本 {}", self.version);
         ensure!(
             (5..=15).contains(&self.autosave_seconds),

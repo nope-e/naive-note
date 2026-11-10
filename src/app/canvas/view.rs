@@ -219,6 +219,7 @@ impl CanvasView {
                 strokes: Vec::new(),
                 active_stroke: None,
                 draft_paper,
+                reference_lines: crate::document::ReferenceLines::default(),
             })
             .collect()
     }

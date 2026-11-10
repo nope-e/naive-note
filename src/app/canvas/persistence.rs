@@ -170,6 +170,8 @@ impl super::CanvasWorkspace {
                     self.persistence.timer =
                         AutosaveTimer::new(Instant::now(), settings.autosave_seconds);
                     self.persistence.settings = settings;
+                    self.document
+                        .set_global_reference(self.persistence.settings.reference_lines);
                 }
                 self.persistence.recovery_open = !drafts.is_empty();
                 if self.persistence.recovery_open {

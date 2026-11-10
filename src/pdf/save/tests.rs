@@ -5,6 +5,22 @@ use std::path::PathBuf;
 use super::*;
 use crate::ink::test_support::pressure_stroke;
 
+fn serialize(
+    base: &[u8],
+    strokes: &[std::sync::Arc<StrokeRecord>],
+    id: Uuid,
+) -> Result<(Vec<u8>, EditData)> {
+    serialize_with_reference(
+        base,
+        strokes,
+        id,
+        ReferenceLayer {
+            lines: crate::document::ReferenceLines::default(),
+            embed_in_pdf: false,
+        },
+    )
+}
+
 struct TestDirectory(PathBuf);
 
 impl TestDirectory {
@@ -214,7 +230,7 @@ fn ignored_private_metadata_can_be_replaced_without_removing_standard_ink() {
 }
 
 #[test]
-fn draft_serializes_its_original_paper_geometry_and_squared_background() {
+fn draft_serializes_its_original_paper_geometry_and_configurable_background() {
     let geometry = PageGeometry::new(
         crate::document::Rect::new(20., 30., 615., 872.),
         crate::document::Rotation::R0,
@@ -225,20 +241,25 @@ fn draft_serializes_its_original_paper_geometry_and_squared_background() {
     let document = PdfDocument::from_bytes(&base).unwrap();
     let page = document.load_pdf_page(0).unwrap();
     assert_eq!(page_geometry(&page).unwrap(), geometry);
-    assert!(
-        !required(&page.object(), "Contents")
-            .unwrap()
-            .read_stream()
-            .unwrap()
-            .is_empty()
-    );
-    let (_, data) = serialize(
+    let (bytes, data) = serialize_with_reference(
         &base,
         &[std::sync::Arc::new(pressure_stroke(geometry).unwrap())],
         Uuid::new_v4(),
+        ReferenceLayer {
+            lines: crate::document::ReferenceLines::default(),
+            embed_in_pdf: true,
+        },
     )
     .unwrap();
     assert_eq!(data.strokes.len(), 1);
+    let reopened = PdfDocument::from_bytes(&bytes).unwrap();
+    assert_eq!(
+        required(&reopened.load_pdf_page(0).unwrap().object(), "Contents")
+            .unwrap()
+            .len()
+            .unwrap(),
+        2
+    );
 }
 
 #[test]
@@ -609,4 +630,114 @@ fn bounded_zstd_cbor_decoder_rejects_truncation_trailing_data_and_large_output()
     assert!(EditData::decode(&zstd::stream::encode_all(cbor.as_slice(), 3).unwrap()).is_err());
     let bomb = zstd::stream::encode_all(vec![0; MAX_EDIT_BYTES + 1].as_slice(), 1).unwrap();
     assert!(EditData::decode(&bomb).is_err());
+}
+
+fn page_content(document: &PdfDocument, page: i32, references: bool) -> Vec<Vec<u8>> {
+    let object = document.load_pdf_page(page).unwrap().object();
+    let Some(contents) = object.get_dict("Contents").unwrap() else {
+        return Vec::new();
+    };
+    let streams: Vec<_> = if contents.is_array().unwrap() {
+        contents.array_iter().unwrap().map(Result::unwrap).collect()
+    } else {
+        vec![contents]
+    };
+    streams
+        .into_iter()
+        .filter(|stream| {
+            stream
+                .get_dict("NaiveNoteReferenceLines")
+                .unwrap()
+                .is_some()
+                == references
+        })
+        .map(|stream| stream.read_stream().unwrap())
+        .collect()
+}
+
+#[test]
+fn reference_vectors_roundtrip_replace_without_duplicates_and_preserve_source_content() {
+    use crate::document::{ReferenceLines, ReferencePattern};
+    for rotation in [0, 90, 180, 270] {
+        let base = fixture(rotation);
+        let source = PdfDocument::from_bytes(&base).unwrap();
+        for (pattern, _) in ReferencePattern::ALL {
+            let layer = ReferenceLayer {
+                lines: ReferenceLines {
+                    pattern,
+                    width: 32.0,
+                    height: 24.0,
+                    color_rgb: [120, 150, 180],
+                },
+                embed_in_pdf: true,
+            };
+            let (bytes, data) =
+                serialize_with_reference(&base, &[], Uuid::new_v4(), layer).unwrap();
+            assert_eq!(data.reference_lines, Some(layer));
+            let (bytes, _) = serialize_with_reference(&bytes, &[], Uuid::new_v4(), layer).unwrap();
+            let saved = PdfDocument::from_bytes(&bytes).unwrap();
+            for page in 0..saved.page_count().unwrap() {
+                assert_eq!(
+                    page_content(&saved, page, false),
+                    page_content(&source, page, false)
+                );
+                assert_eq!(
+                    page_content(&saved, page, true).len(),
+                    if pattern == ReferencePattern::None {
+                        0
+                    } else {
+                        2
+                    }
+                );
+            }
+            // Turning embedding off removes our old vectors, while retaining
+            // document metadata and all source streams across every page.
+            let overlay = ReferenceLayer {
+                embed_in_pdf: false,
+                ..layer
+            };
+            let (bytes, data) =
+                serialize_with_reference(&bytes, &[], Uuid::new_v4(), overlay).unwrap();
+            assert_eq!(data.reference_lines, Some(overlay));
+            let saved = PdfDocument::from_bytes(&bytes).unwrap();
+            for page in 0..saved.page_count().unwrap() {
+                assert!(page_content(&saved, page, true).is_empty());
+                assert_eq!(
+                    page_content(&saved, page, false),
+                    page_content(&source, page, false)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_edit_attachment_without_reference_metadata_uses_the_fallback() {
+    #[derive(serde::Serialize)]
+    struct LegacyEditData {
+        format_version: u32,
+        document_id: Uuid,
+        strokes: Vec<SavedStroke>,
+    }
+    let mut cbor = Vec::new();
+    ciborium::into_writer(
+        &LegacyEditData {
+            format_version: FORMAT_VERSION,
+            document_id: Uuid::new_v4(),
+            strokes: Vec::new(),
+        },
+        &mut cbor,
+    )
+    .unwrap();
+    let data = EditData::decode(&zstd::stream::encode_all(cbor.as_slice(), 3).unwrap()).unwrap();
+    assert!(data.reference_lines.is_none());
+    let mut invalid = data;
+    invalid.reference_lines = Some(ReferenceLayer {
+        lines: crate::document::ReferenceLines {
+            width: f64::NAN,
+            ..crate::document::ReferenceLines::default()
+        },
+        embed_in_pdf: false,
+    });
+    assert!(EditData::decode(&invalid.encode().unwrap()).is_err());
 }

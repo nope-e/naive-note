@@ -214,7 +214,9 @@ fn worker_refinement_is_superseded_and_preserves_session_after_failed_open() {
         let _ = wait.recv_timeout(Duration::from_secs(5));
     })
     .unwrap();
-    let document = worker.open(path.clone()).unwrap();
+    let document = worker
+        .open(path.clone(), crate::document::ReferenceLines::default())
+        .unwrap();
     assert!(
         matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
         PdfResponse::Opened(response) if response.request == document && response.result.is_ok())
@@ -245,7 +247,12 @@ fn worker_refinement_is_superseded_and_preserves_session_after_failed_open() {
         }
         _ => panic!("expected the latest tile job"),
     }
-    let failed = worker.open(directory.join("missing.pdf")).unwrap();
+    let failed = worker
+        .open(
+            directory.join("missing.pdf"),
+            crate::document::ReferenceLines::default(),
+        )
+        .unwrap();
     release.send(()).unwrap();
     assert!(
         matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
@@ -265,7 +272,9 @@ fn worker_refinement_is_superseded_and_preserves_session_after_failed_open() {
         received.recv_timeout(Duration::from_millis(100)),
         Err(mpsc::RecvTimeoutError::Timeout)
     ));
-    let replacement = worker.open(path.clone()).unwrap();
+    let replacement = worker
+        .open(path.clone(), crate::document::ReferenceLines::default())
+        .unwrap();
     assert!(
         matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
         PdfResponse::Opened(response) if response.request == replacement && response.result.is_ok())
@@ -339,7 +348,9 @@ fn worker_saves_snapshot_and_keeps_the_immutable_preview_session_available() {
         sender.send(response).unwrap();
     })
     .unwrap();
-    let document = worker.open(source.clone()).unwrap();
+    let document = worker
+        .open(source.clone(), crate::document::ReferenceLines::default())
+        .unwrap();
     assert!(
         matches!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), PdfResponse::Opened(response) if response.result.is_ok())
     );
@@ -349,6 +360,10 @@ fn worker_saves_snapshot_and_keeps_the_immutable_preview_session_available() {
             revision: 1,
             strokes: vec![Arc::new(pressure_stroke(geometry).unwrap())],
             draft_page: geometry,
+            reference_lines: crate::document::ReferenceLayer {
+                lines: crate::document::ReferenceLines::default(),
+                embed_in_pdf: true,
+            },
             document_id: uuid::Uuid::new_v4(),
             path: directory.join("saved.pdf"),
             tracked_target: Some((source.clone(), crate::storage::FileFingerprint::of(&bytes))),
@@ -414,7 +429,9 @@ fn saving_a_closed_session_returns_an_error_without_creating_output() {
         wait.recv_timeout(Duration::from_secs(5)).unwrap();
     })
     .unwrap();
-    let document = worker.open(source.clone()).unwrap();
+    let document = worker
+        .open(source.clone(), crate::document::ReferenceLines::default())
+        .unwrap();
     assert!(
         matches!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), PdfResponse::Opened(response) if response.result.is_ok())
     );
@@ -425,6 +442,10 @@ fn saving_a_closed_session_returns_an_error_without_creating_output() {
             revision: 1,
             strokes: vec![Arc::new(pressure_stroke(geometry).unwrap())],
             draft_page: geometry,
+            reference_lines: crate::document::ReferenceLayer {
+                lines: crate::document::ReferenceLines::default(),
+                embed_in_pdf: true,
+            },
             document_id: uuid::Uuid::new_v4(),
             path: output.clone(),
             tracked_target: None,
@@ -521,12 +542,16 @@ fn multipage_worker_delivers_incremental_previews_and_close_cancels_the_rest() {
         let _ = wait.recv_timeout(Duration::from_secs(5));
     })
     .unwrap();
-    let document = worker.open(path.clone()).unwrap();
+    let document = worker
+        .open(path.clone(), crate::document::ReferenceLines::default())
+        .unwrap();
     assert!(
         matches!(received.recv_timeout(Duration::from_secs(5)).unwrap(),
         PdfResponse::Opened(response) if response.result.as_ref().unwrap().pages.len() == 6)
     );
-    let request = worker.render_pages(document, vec![2, 4], vec![]).unwrap();
+    let request = worker
+        .render_pages(document, vec![2, 4], vec![], ReferenceLines::default())
+        .unwrap();
     release.send(()).unwrap();
     match received.recv_timeout(Duration::from_secs(5)).unwrap() {
         PdfResponse::Tiles(response) => {
@@ -545,8 +570,12 @@ fn multipage_worker_delivers_incremental_previews_and_close_cancels_the_rest() {
         }
         _ => panic!("expected the final preview"),
     }
-    let superseded = worker.render_pages(document, vec![1], vec![]).unwrap();
-    let newest = worker.render_pages(document, vec![3, 5], vec![]).unwrap();
+    let superseded = worker
+        .render_pages(document, vec![1], vec![], ReferenceLines::default())
+        .unwrap();
+    let newest = worker
+        .render_pages(document, vec![3, 5], vec![], ReferenceLines::default())
+        .unwrap();
     release.send(()).unwrap();
     match received.recv_timeout(Duration::from_secs(5)).unwrap() {
         PdfResponse::Tiles(response) => {
@@ -565,4 +594,156 @@ fn multipage_worker_delivers_incremental_previews_and_close_cancels_the_rest() {
     drop(worker);
     std::fs::remove_file(path).unwrap();
     std::fs::remove_dir(directory).unwrap();
+}
+
+#[test]
+fn saved_reference_vectors_are_removed_only_from_the_live_render_document() {
+    use crate::document::{ReferenceLayer, ReferenceLines};
+    let source = pdf_bytes("/MediaBox [0 0 200 300]");
+    let layer = ReferenceLayer {
+        lines: ReferenceLines::default(),
+        embed_in_pdf: true,
+    };
+    let (bytes, _) =
+        super::super::save::serialize_with_reference(&source, &[], uuid::Uuid::new_v4(), layer)
+            .unwrap();
+    let session = PdfSession::from_bytes(&bytes).unwrap();
+    assert_eq!(session.base(), bytes);
+    assert_eq!(
+        super::super::save::read_edit_data(&session.document)
+            .unwrap()
+            .unwrap()
+            .reference_lines,
+        Some(layer)
+    );
+    let contents = session
+        .first_page()
+        .unwrap()
+        .object()
+        .get_dict("Contents")
+        .unwrap()
+        .unwrap();
+    assert_eq!(contents.len().unwrap(), 1);
+    assert_eq!(
+        contents
+            .get_array(0)
+            .unwrap()
+            .unwrap()
+            .read_stream()
+            .unwrap(),
+        b"0.2 0.6 0.8 rg 30 40 80 120 re f\n"
+    );
+}
+
+#[test]
+fn reopened_display_list_places_references_between_source_and_existing_ink() {
+    // Inspect vector command order only: no pixels, framebuffer, window or image.
+    use crate::document::ReferenceLayer;
+    use mupdf::{ColorParams, NativeDevice, StrokeState};
+    use std::{cell::RefCell, rc::Rc};
+
+    #[derive(Default)]
+    struct Commands(Vec<[u8; 3]>);
+    impl Commands {
+        fn push(&mut self, color: &[f32]) {
+            if color.len() == 3 {
+                self.0
+                    .push(std::array::from_fn(|i| (color[i] * 255.0).round() as u8));
+            }
+        }
+    }
+    impl NativeDevice for Commands {
+        fn fill_path(
+            &mut self,
+            _: &mupdf::Path,
+            _: bool,
+            _: Matrix,
+            _: &Colorspace,
+            color: &[f32],
+            _: f32,
+            _: ColorParams,
+        ) {
+            self.push(color);
+        }
+        fn stroke_path(
+            &mut self,
+            _: &mupdf::Path,
+            _: &StrokeState,
+            _: Matrix,
+            _: &Colorspace,
+            color: &[f32],
+            _: f32,
+            _: ColorParams,
+        ) {
+            self.push(color);
+        }
+    }
+    let lines = ReferenceLines {
+        color_rgb: [200, 10, 100],
+        ..ReferenceLines::default()
+    };
+    for rotation in [0, 90, 180, 270] {
+        let source = pdf_bytes(&format!(
+            "/MediaBox [-20 -30 220 330] /CropBox [10 20 200 300] /Rotate {rotation}"
+        ));
+        let geometry = PdfSession::from_bytes(&source).unwrap().pages[0];
+        let stroke = Arc::new(crate::ink::test_support::pressure_stroke(geometry).unwrap());
+        let (bytes, _) = super::super::save::serialize_with_reference(
+            &source,
+            &[stroke],
+            uuid::Uuid::new_v4(),
+            ReferenceLayer {
+                lines,
+                embed_in_pdf: true,
+            },
+        )
+        .unwrap();
+        for metadata in [true, false] {
+            let bytes = if metadata {
+                bytes.clone()
+            } else {
+                let document = PdfDocument::from_bytes(&bytes).unwrap();
+                document.catalog().unwrap().dict_delete("Names").unwrap();
+                let mut result = Vec::new();
+                document.write_to(&mut result).unwrap();
+                result
+            };
+            let mut session = PdfSession::from_bytes(&bytes).unwrap();
+            session.use_reference_defaults(lines);
+            let commands = Rc::new(RefCell::new(Commands::default()));
+            let device = Device::from_native(Rc::clone(&commands)).unwrap();
+            let prepared = session.prepare(0).unwrap();
+            prepared
+                .display_list
+                .run(&device, &Matrix::IDENTITY, prepared.bounds)
+                .unwrap();
+            drop(device);
+            let commands = commands.borrow();
+            let source = commands
+                .0
+                .iter()
+                .position(|color| *color == [51, 153, 204])
+                .unwrap();
+            let reference = commands
+                .0
+                .iter()
+                .position(|color| *color == lines.color_rgb)
+                .unwrap();
+            let ink = commands
+                .0
+                .iter()
+                .position(|color| *color == [25, 105, 190])
+                .unwrap();
+            assert!(
+                source < reference && reference < ink,
+                "vector order: {:?}",
+                commands.0
+            );
+            session.set_reference_lines(ReferenceLines {
+                pattern: ReferencePattern::None,
+                ..lines
+            });
+            assert!(session.prepared.is_empty());
+        }
+    }
 }

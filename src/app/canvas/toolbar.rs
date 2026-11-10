@@ -2,6 +2,7 @@
 
 mod color_picker;
 mod floating;
+mod global_settings;
 mod header;
 mod icons;
 mod menus;
@@ -18,6 +19,7 @@ use super::{ink_input::CanvasTool, view::ViewAction};
 
 pub(super) enum ToolbarAction {
     Open,
+    New,
     Save,
     SaveAs,
     Close,
@@ -32,6 +34,8 @@ pub(super) enum ToolbarAction {
     Color([u8; 3]),
     Width(f64),
     PressureGamma(f64),
+    GlobalReference(crate::document::ReferenceLines),
+    DocumentReference(crate::document::ReferenceLayer),
     View(ViewAction),
 }
 
@@ -45,7 +49,6 @@ pub(super) struct DocumentActions {
     pub tool: CanvasTool,
     pub mouse_pen: bool,
     pub smoothing: bool,
-    pub autosave_seconds: u64,
     pub recovery_count: usize,
 }
 
@@ -57,6 +60,10 @@ pub(super) struct ToolbarContext<'a> {
     pub bottom_inset: f32,
     pub style: &'a PenStyle,
     pub document: DocumentActions,
+    pub settings: &'a crate::storage::preferences::Settings,
+    pub reference_layer: crate::document::ReferenceLayer,
+    pub reference_uses_global: bool,
+    pub can_edit_document: bool,
 }
 
 #[derive(Default)]
@@ -64,6 +71,8 @@ pub(super) struct WorkspaceToolbar {
     pages_open: bool,
     focus_mode: bool,
     color_picker: color_picker::ColorPicker,
+    settings_open: bool,
+    settings_document_tab: bool,
 }
 
 impl WorkspaceToolbar {
@@ -77,6 +86,13 @@ impl WorkspaceToolbar {
             .then(|| shortcuts(ui, &context.document))
             .flatten();
         self.header(ui, context, &mut action, process_input);
+        global_settings::show(
+            ui,
+            &mut self.settings_open,
+            &mut self.settings_document_tab,
+            context,
+            &mut action,
+        );
         if !self.focus_mode {
             self.sidebar(ui, context, &mut action);
             self.floating(ui.ctx(), context, &mut action);
@@ -154,6 +170,8 @@ fn shortcuts(ui: &egui::Ui, document: &DocumentActions) -> Option<ToolbarAction>
             } else {
                 ToolbarAction::Save
             })
+        } else if input.modifiers.ctrl && input.key_pressed(egui::Key::T) {
+            Some(ToolbarAction::New)
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::O) {
             Some(ToolbarAction::Open)
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::W) {
