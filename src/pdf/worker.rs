@@ -6,13 +6,14 @@ use std::{
         mpsc::{self, Sender},
     },
     thread::{self, JoinHandle},
+    time::Instant,
 };
 
 use anyhow::{Context, Result};
 
 use super::{
-    OpenResponse, PdfResponse, SaveResponse, SaveSnapshot, SavedPdf, TileKey, TileResponse,
-    backend::PdfSession,
+    OpenResponse, PdfResponse, SaveError, SaveResponse, SaveSnapshot, SavedPdf, TileKey,
+    TileResponse, backend::PdfSession,
 };
 
 enum Command {
@@ -30,7 +31,9 @@ enum Command {
     Save {
         request: u64,
         snapshot: SaveSnapshot,
+        enqueued: Instant,
     },
+    RemoveDraft(PathBuf),
     Shutdown,
 }
 
@@ -142,18 +145,45 @@ impl PdfWorker {
                         Command::Close => {
                             session.take();
                         }
-                        Command::Save { request, snapshot } => {
+                        Command::Save {
+                            request,
+                            snapshot,
+                            enqueued,
+                        } => {
+                            let started = Instant::now();
                             let result =
                                 save_snapshot(&snapshot, session.as_ref()).map_err(|error| {
                                     log::warn!("PDF save failed: {error:#}");
-                                    format!("{error:#}")
+                                    SaveError {
+                                        message: format!("{error:#}"),
+                                        conflict: error
+                                            .downcast_ref::<crate::storage::SaveConflict>()
+                                            .is_some(),
+                                    }
                                 });
+                            log::info!(
+                                "PDF save r{}: queue {:.1} ms, transaction {:.1} ms, success={}",
+                                snapshot.revision,
+                                started.duration_since(enqueued).as_secs_f64() * 1000.0,
+                                started.elapsed().as_secs_f64() * 1000.0,
+                                result.is_ok()
+                            );
                             deliver(PdfResponse::Saved(SaveResponse {
                                 document: snapshot.document,
                                 request,
                                 revision: snapshot.revision,
                                 result,
                             }));
+                        }
+                        Command::RemoveDraft(path) => {
+                            let result = match std::fs::remove_file(&path) {
+                                Ok(()) => Ok(()),
+                                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                                    Ok(())
+                                }
+                                Err(error) => Err(format!("草稿副本清理失败：{error}")),
+                            };
+                            deliver(PdfResponse::DraftRemoved { path, result });
                         }
                         Command::Shutdown => break,
                     }
@@ -212,9 +242,18 @@ impl PdfWorker {
     pub fn save(&self, snapshot: SaveSnapshot) -> Result<u64> {
         let request = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed) + 1;
         self.sender
-            .send(Command::Save { request, snapshot })
+            .send(Command::Save {
+                request,
+                snapshot,
+                enqueued: Instant::now(),
+            })
             .context("MuPDF worker stopped")?;
         Ok(request)
+    }
+
+    /// FIFO with saves: a late write cannot recreate a discarded recovery copy.
+    pub fn remove_draft(&self, path: PathBuf) {
+        let _ = self.sender.send(Command::RemoveDraft(path));
     }
 
     fn invalidate(&self) -> u64 {
@@ -232,6 +271,7 @@ fn save_snapshot(snapshot: &SaveSnapshot, session: Option<&(u64, PdfSession)>) -
         Some((path, fingerprint)) if storage::same_file_path(path, &snapshot.path) => {
             Some(*fingerprint)
         }
+        _ if snapshot.require_new_target => None,
         _ => storage::fingerprint(&snapshot.path)?,
     };
     let draft;

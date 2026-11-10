@@ -198,3 +198,91 @@ fn failed_and_stale_saves_keep_dirty_edits_redo_and_the_previous_target() {
     assert!(!document.can_close());
     assert!(document.save_path().is_none());
 }
+
+#[test]
+fn recovered_copy_remains_unnamed_and_requires_confirmation_even_without_new_edits() {
+    let mut document = document();
+    document.pending = Some(12);
+    document.saving.recovering = Some("recovered.pdf".into());
+    let mut pdf = fixture_pdf();
+    pdf.path = "recovered.pdf".into();
+    assert!(
+        document
+            .opened(OpenResponse {
+                request: 12,
+                result: Ok(pdf)
+            })
+            .is_some()
+    );
+    assert!(document.is_loaded());
+    assert!(document.save_path().is_none());
+    assert!(document.is_dirty() && document.needs_discard_confirmation());
+    assert!(!document.can_undo());
+    assert!(!document.autosave(fixture_pdf().pages[0]));
+    assert!(document.subtitle().contains("尚未命名"));
+    // Drop alone represents abnormal termination and keeps the copy for recovery.
+}
+
+#[test]
+fn failed_save_as_conflict_does_not_pause_autosaving_the_unchanged_current_target() {
+    let mut document = document();
+    add(&mut document);
+    document.saved_target = Some((
+        "original.pdf".into(),
+        crate::storage::FileFingerprint::of(b"original"),
+    ));
+    document.saving.destination = Some("other.pdf".into());
+    document.pending_save = Some((100, document.revision().current));
+    document.saved(crate::pdf::SaveResponse {
+        document: None,
+        request: 100,
+        revision: document.revision().current,
+        result: Err(crate::pdf::SaveError {
+            message: "external edit".into(),
+            conflict: true,
+        }),
+    });
+    assert!(!document.saving.paused);
+    assert_eq!(
+        document.save_path(),
+        Some(std::path::Path::new("original.pdf"))
+    );
+    assert!(document.is_dirty());
+}
+
+#[test]
+fn discard_queues_cleanup_after_an_inflight_draft_save_and_ignores_its_late_response() {
+    use std::{fs, sync::mpsc, time::Duration};
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(".scratch")
+        .join(format!("draft-cleanup-test-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let (sender, responses) = mpsc::channel();
+    let worker = PdfWorker::new(move |response| {
+        let _ = sender.send(response);
+    })
+    .unwrap();
+    let mut document = CanvasDocument::with_worker(worker);
+    document.set_draft_directory(root.clone());
+    add(&mut document);
+    assert!(document.autosave(fixture_pdf().pages[0]));
+    let old_id = document.document_id;
+    document.close(); // FIFO cleanup must follow any already submitted write.
+    add(&mut document);
+    let revision = document.revision();
+    assert_ne!(document.document_id, old_id);
+    let response = responses.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(response, PdfResponse::Saved(_)));
+    document.receive(response);
+    assert_eq!(document.revision(), revision);
+    assert!(document.save_path().is_none());
+    assert!(document.saving.copy.is_none());
+    let response = responses.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(
+        response,
+        PdfResponse::DraftRemoved { result: Ok(()), .. }
+    ));
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+    drop(document);
+    fs::remove_dir(root).unwrap();
+}

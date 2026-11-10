@@ -150,6 +150,7 @@ impl WorkspaceToolbar {
                             .frame(theme::popup_frame())
                             .gap(10.0)
                             .width(248.0)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| super::menus::main_menu(ui, context, action));
                     },
                 );

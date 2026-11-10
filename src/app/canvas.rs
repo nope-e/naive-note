@@ -4,6 +4,7 @@ mod area;
 mod document;
 mod ink_input;
 mod pdf_preview;
+mod persistence;
 mod scrollbars;
 mod status_bar;
 #[cfg(test)]
@@ -12,12 +13,13 @@ mod toolbar;
 mod transition;
 mod view;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Instant};
 
 use anyhow::Result;
 use area::CanvasArea;
 use document::CanvasDocument;
 use ink_input::CanvasInput;
+use persistence::{AutosaveTimer, RecoveryAction, WorkspacePersistence};
 use toolbar::{ToolbarAction, WorkspaceToolbar};
 use transition::{DocumentAction, DocumentTransition, TransitionDecision};
 use view::CanvasView;
@@ -37,20 +39,33 @@ pub(super) struct CanvasWorkspace {
     save_requested: Option<PathBuf>,
     exit_requested: bool,
     transition: DocumentTransition,
+    persistence: WorkspacePersistence,
 }
 
 impl CanvasWorkspace {
     pub fn new(proxy: EventLoopProxy<UserEvent>) -> Result<Self> {
+        let mut document = CanvasDocument::new(proxy.clone())?;
+        let persistence = match WorkspacePersistence::new(proxy) {
+            Ok(persistence) => persistence,
+            Err(error) => {
+                document.set_error(format!("本地数据不可用：{error:#}"));
+                WorkspacePersistence::default()
+            }
+        };
+        if let Some(root) = &persistence.root {
+            document.set_draft_directory(root.join("drafts"));
+        }
         Ok(Self {
             view: CanvasView::draft(),
             area: CanvasArea::default(),
-            document: CanvasDocument::new(proxy)?,
+            document,
             input: CanvasInput::for_editor(),
             toolbar: WorkspaceToolbar::default(),
             open_requested: false,
             save_requested: None,
             exit_requested: false,
             transition: DocumentTransition::default(),
+            persistence,
         })
     }
 
@@ -82,15 +97,36 @@ impl CanvasWorkspace {
     fn apply_transition(&mut self, action: DocumentAction) {
         match action {
             DocumentAction::Open(path) => self.document.open(path),
+            DocumentAction::Recover(path) => self.document.recover(path),
             DocumentAction::Close => self.close_pdf(),
-            DocumentAction::Exit => self.exit_requested = true,
+            DocumentAction::Exit => {
+                self.document.discard_recovery();
+                self.exit_requested = true;
+            }
         }
     }
 
     pub fn pdf_response(&mut self, response: PdfResponse) {
+        if let PdfResponse::DraftRemoved { path, result } = response {
+            self.persistence.deleting.retain(|pending| pending != &path);
+            match result {
+                Ok(()) => self.persistence.drafts.retain(|draft| draft.path != path),
+                Err(error) => self.document.set_error(error),
+            }
+            return;
+        }
+        let opened_path = match &response {
+            PdfResponse::Opened(response) => {
+                response.result.as_ref().ok().map(|pdf| pdf.path.clone())
+            }
+            _ => None,
+        };
         let was_saving = self.document.is_saving();
         let saved_ok = matches!(&response, PdfResponse::Saved(response) if response.result.is_ok());
         if let Some(page) = self.document.receive(response) {
+            self.persistence
+                .drafts
+                .retain(|draft| Some(&draft.path) != opened_path.as_ref());
             self.input.cancel_drawing();
             self.view = CanvasView::new(page);
             self.area = CanvasArea::default();
@@ -156,11 +192,14 @@ impl CanvasWorkspace {
     }
 
     pub fn pen_sample(&mut self, event: crate::platform::PenEvent, over_ui: bool) -> bool {
-        self.input.ui_blocked = over_ui || self.transition.is_pending();
+        self.input.ui_blocked =
+            over_ui || self.transition.is_pending() || self.persistence.recovery_open;
         let (ui_owned, stroke) = self.input.pen(
             event.sample,
             &mut self.view,
-            self.document.can_ink() && !self.transition.is_pending(),
+            self.document.can_ink()
+                && !self.transition.is_pending()
+                && !self.persistence.recovery_open,
             event.modifiers,
         );
         if let Some(stroke) = stroke {
@@ -176,12 +215,15 @@ impl CanvasWorkspace {
         modifiers: egui::Modifiers,
         over_ui: bool,
     ) -> bool {
-        self.input.ui_blocked = over_ui || self.transition.is_pending();
+        self.input.ui_blocked =
+            over_ui || self.transition.is_pending() || self.persistence.recovery_open;
         let (owned, stroke) = self.input.mouse_button(
             down,
             position,
             &mut self.view,
-            self.document.can_ink() && !self.transition.is_pending(),
+            self.document.can_ink()
+                && !self.transition.is_pending()
+                && !self.persistence.recovery_open,
             modifiers,
         );
         if let Some(stroke) = stroke {
@@ -217,7 +259,8 @@ impl CanvasWorkspace {
         );
         let title = self.document.title();
         let subtitle = self.document.subtitle();
-        let interact = process_input && !self.transition.is_pending();
+        let interact =
+            process_input && !self.transition.is_pending() && !self.persistence.recovery_open;
         let mut action = self.toolbar.show(
             ui,
             &toolbar::ToolbarContext {
@@ -237,6 +280,8 @@ impl CanvasWorkspace {
                     tool: self.input.tool,
                     mouse_pen: self.input.mouse_pen,
                     smoothing: self.input.smoothing,
+                    autosave_seconds: self.persistence.settings.autosave_seconds,
+                    recovery_count: self.persistence.drafts.len(),
                 },
             },
             interact,
@@ -256,6 +301,7 @@ impl CanvasWorkspace {
                             | ToolbarAction::Width(_)
                             | ToolbarAction::PressureGamma(_)
                             | ToolbarAction::DismissNotice
+                            | ToolbarAction::AutosaveInterval(_)
                     )
                 )
             {
@@ -292,26 +338,42 @@ impl CanvasWorkspace {
                 }
                 Some(ToolbarAction::MousePen) => {
                     self.input.mouse_pen = !self.input.mouse_pen;
+                    self.persist_settings();
                     action = None;
                 }
                 Some(ToolbarAction::Smoothing) => {
                     self.input.smoothing = !self.input.smoothing;
+                    self.persist_settings();
                     action = None;
                 }
                 Some(ToolbarAction::Color(color)) => {
                     self.input.style.color_rgb = color;
+                    self.persist_settings();
                     action = None;
                 }
                 Some(ToolbarAction::Width(width)) => {
                     self.input.style.max_width_pt = width;
+                    self.persist_settings();
                     action = None;
                 }
                 Some(ToolbarAction::PressureGamma(gamma)) => {
                     self.input.style.pressure_gamma = gamma;
+                    self.persist_settings();
                     action = None;
                 }
                 Some(ToolbarAction::DismissNotice) => {
                     self.document.dismiss_notice();
+                    action = None;
+                }
+                Some(ToolbarAction::AutosaveInterval(seconds)) => {
+                    self.persistence.settings.autosave_seconds = seconds;
+                    self.persistence.timer = AutosaveTimer::new(Instant::now(), seconds);
+                    self.persist_settings();
+                    action = None;
+                }
+                Some(ToolbarAction::RecoverDrafts) => {
+                    self.input.cancel_drawing();
+                    self.persistence.recovery_open = true;
                     action = None;
                 }
                 _ => {}
@@ -346,7 +408,10 @@ impl CanvasWorkspace {
             .show(
                 ui,
                 framebuffer,
-                process_input && !self.input.is_drawing() && !self.transition.is_pending(),
+                process_input
+                    && !self.input.is_drawing()
+                    && !self.transition.is_pending()
+                    && !self.persistence.recovery_open,
                 &mut self.view,
                 view_action,
             )
@@ -370,6 +435,23 @@ impl CanvasWorkspace {
 
         // Render the modal last so it blocks all other UI. Apply a decision only
         // on the input pass: egui can repeat layout within the same frame.
+        if !self.transition.is_pending()
+            && let Some(recovery) = self.persistence.show_recovery(ui.ctx())
+            && process_input
+        {
+            self.input.cancel_drawing();
+            match recovery {
+                RecoveryAction::Restore(path) => {
+                    self.persistence.recovery_open = false;
+                    self.request_transition(DocumentAction::Recover(path));
+                }
+                RecoveryAction::Delete(path) => {
+                    self.persistence.deleting.push(path.clone());
+                    self.document.remove_draft(path);
+                }
+            }
+            ui.ctx().request_repaint();
+        }
         if let Some(decision) = self.transition.show(
             ui.ctx(),
             &title,

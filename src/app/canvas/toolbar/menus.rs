@@ -67,6 +67,51 @@ pub(super) fn main_menu(
                 ToolbarAction::Close,
                 action,
             );
+            command(
+                ui,
+                Icon::Open,
+                "恢复草稿副本…",
+                "",
+                context.document.recovery_count > 0,
+                ToolbarAction::RecoverDrafts,
+                action,
+            );
+            widgets::section(ui, "自动保存");
+            ui.horizontal(|ui| {
+                ui.label("检查间隔");
+                let mut seconds = context.document.autosave_seconds;
+                if ui
+                    .add_enabled(seconds > 5, egui::Button::new("−"))
+                    .on_hover_text("减少 1 秒")
+                    .clicked()
+                {
+                    seconds -= 1;
+                    *action = Some(ToolbarAction::AutosaveInterval(seconds));
+                }
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut seconds)
+                            .range(5..=15)
+                            .suffix(" 秒"),
+                    )
+                    .changed()
+                {
+                    *action = Some(ToolbarAction::AutosaveInterval(seconds));
+                }
+                if ui
+                    .add_enabled(seconds < 15, egui::Button::new("＋"))
+                    .on_hover_text("增加 1 秒")
+                    .clicked()
+                {
+                    seconds += 1;
+                    *action = Some(ToolbarAction::AutosaveInterval(seconds));
+                }
+            });
+            ui.label(
+                egui::RichText::new("有变化时保存；未命名草稿保留本地副本")
+                    .small()
+                    .color(theme::MUTED),
+            );
             ui.add_space(5.0);
             ui.separator();
             widgets::section(ui, "编辑");

@@ -10,8 +10,27 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 
+pub mod preferences;
 #[cfg(test)]
 mod tests;
+
+#[derive(Debug)]
+pub struct SaveConflict;
+
+impl std::fmt::Display for SaveConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("目标 PDF 已被外部修改或删除；请另存为以保留当前笔迹")
+    }
+}
+
+impl std::error::Error for SaveConflict {}
+
+fn check_target(actual: Option<FileFingerprint>, expected: Option<FileFingerprint>) -> Result<()> {
+    if actual != expected {
+        return Err(SaveConflict.into());
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// In-memory change detector, not a persistent or cryptographic identifier.
@@ -73,10 +92,7 @@ pub fn save_atomic(
     bytes: &[u8],
     verify: impl FnOnce(&Path) -> Result<()>,
 ) -> Result<FileFingerprint> {
-    ensure!(
-        fingerprint(target)? == expected,
-        "目标 PDF 已被外部修改或删除；请另存为以保留当前笔迹"
-    );
+    check_target(fingerprint(target)?, expected)?;
     let parent = target
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -110,23 +126,21 @@ pub fn save_atomic(
             use std::os::windows::fs::OpenOptionsExt;
             options.share_mode(0x1 | 0x4); // FILE_SHARE_READ | FILE_SHARE_DELETE
         }
-        let mut guard = options
-            .open(target)
-            .context("目标 PDF 被占用或已删除；请重试或另存为")?;
+        let mut guard = options.open(target).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                anyhow::Error::new(SaveConflict)
+            } else {
+                anyhow::Error::new(error).context("目标 PDF 被占用；请重试或另存为")
+            }
+        })?;
         ensure!(
             !guard.metadata()?.permissions().readonly(),
             "目标 PDF 为只读；请另存为"
         );
-        ensure!(
-            Some(FileFingerprint::read(&mut guard)?) == expected,
-            "目标 PDF 已被外部修改；请另存为"
-        );
+        check_target(Some(FileFingerprint::read(&mut guard)?), expected)?;
         Some(guard)
     } else {
-        ensure!(
-            fingerprint(target)?.is_none(),
-            "目标文件已出现；请重新选择另存为路径"
-        );
+        check_target(fingerprint(target)?, None)?;
         None
     };
     fs::rename(&staging.0, target)

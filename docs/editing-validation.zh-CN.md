@@ -2,7 +2,7 @@
 
 日期：2026-11-10，对应 PLAN 步骤 7。实现已接入，以下窗口、视觉及真实输入项目均待用户手动验收。Agent 不启动窗口、不操作 GUI、不截图、不回读窗口帧缓冲。
 
-由用户运行 `cargo run --offline --locked`，准备一份多页 PDF（最好带已有批注），使用可丢弃的会话笔迹。Ctrl+S、另存为及确认框保存已在步骤 8 接入，详见 [正式保存手动验收](saving-validation.zh-CN.md)；恢复日志尚未接入。
+由用户运行 `cargo run --offline --locked`，准备一份多页 PDF（最好带已有批注），使用可丢弃的会话笔迹。Ctrl+S、另存为及确认框保存已在步骤 8 接入，详见 [正式保存手动验收](saving-validation.zh-CN.md)；定时自动保存已接入，保留会话历史；丢弃仅放弃尚未成功提交的更改，详见 [自动保存验收](autosave-validation.zh-CN.md)。
 
 ## 操作与预期
 

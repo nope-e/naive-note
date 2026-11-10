@@ -20,6 +20,7 @@ use runtime::Runtime;
 pub enum UserEvent {
     Repaint(Instant),
     PdfResponse(Box<crate::pdf::PdfResponse>),
+    StorageResponse(Box<crate::storage::preferences::StorageResponse>),
 }
 
 pub fn run() -> Result<()> {

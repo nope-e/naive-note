@@ -34,6 +34,7 @@ pub(super) struct CanvasDocument {
     pending_save: Option<(u64, u64)>,
     saved_target: Option<(PathBuf, crate::storage::FileFingerprint)>,
     document_id: uuid::Uuid,
+    saving: saving::SavingState,
 }
 
 impl CanvasDocument {
@@ -56,10 +57,21 @@ impl CanvasDocument {
             pending_save: None,
             saved_target: None,
             document_id: uuid::Uuid::new_v4(),
+            saving: saving::SavingState::default(),
         }
     }
 
     pub fn open(&mut self, path: PathBuf) {
+        self.saving.recovering = None;
+        self.start_open(path);
+    }
+
+    pub fn recover(&mut self, path: PathBuf) {
+        self.saving.recovering = Some(path.clone());
+        self.start_open(path);
+    }
+
+    fn start_open(&mut self, path: PathBuf) {
         self.notice = None;
         if let Some(loaded) = self.loaded.as_mut() {
             loaded.preview.cancel(&self.worker);
@@ -92,6 +104,7 @@ impl CanvasDocument {
                 }
                 None
             }
+            PdfResponse::DraftRemoved { .. } => None,
         }
     }
 
@@ -102,9 +115,18 @@ impl CanvasDocument {
         self.pending = None;
         match response.result {
             Ok(pdf) => {
+                let recovering = self.saving.recovering.take();
+                self.discard_recovery_except(recovering.as_deref());
+                self.saving.reset();
                 self.edits = EditHistory::default();
                 self.pending_save = None;
-                self.saved_target = Some((pdf.path.clone(), pdf.fingerprint));
+                self.saved_target = if recovering.is_some() {
+                    self.saving.copy = Some((pdf.path.clone(), Some(pdf.fingerprint)));
+                    self.saving.restored = true;
+                    None
+                } else {
+                    Some((pdf.path.clone(), pdf.fingerprint))
+                };
                 self.document_id = uuid::Uuid::new_v4();
                 let pages = pdf.pages.clone();
                 self.message = Some(format!(
@@ -118,6 +140,7 @@ impl CanvasDocument {
                 Some(pages)
             }
             Err(error) => {
+                self.saving.recovering = None;
                 self.set_error(format!("打开失败：{error}"));
                 None
             }
@@ -125,6 +148,7 @@ impl CanvasDocument {
     }
 
     pub fn close(&mut self) {
+        self.discard_recovery();
         self.worker.close();
         self.pending = None;
         self.loaded = None;
@@ -135,6 +159,7 @@ impl CanvasDocument {
         self.pending_save = None;
         self.saved_target = None;
         self.document_id = uuid::Uuid::new_v4();
+        self.saving.reset();
     }
 
     pub fn can_ink(&self) -> bool {
@@ -168,7 +193,7 @@ impl CanvasDocument {
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.revision().is_dirty()
+        self.revision().is_dirty() || self.saving.restored
     }
 
     pub fn needs_discard_confirmation(&self) -> bool {
@@ -235,7 +260,7 @@ impl CanvasDocument {
         self.message.as_deref()
     }
 
-    fn set_error(&mut self, message: String) {
+    pub(super) fn set_error(&mut self, message: String) {
         self.notice = Some(message.clone());
         self.message = Some(message);
     }
@@ -255,6 +280,9 @@ impl CanvasDocument {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .into_owned();
+        }
+        if self.saving.restored {
+            return "恢复的未命名草稿".to_owned();
         }
         self.loaded.as_ref().map_or_else(
             || "新建文档".to_owned(),
@@ -277,9 +305,19 @@ impl CanvasDocument {
         if self.pending.is_some() {
             return "正在打开 PDF…".to_owned();
         }
+        if self.saving.paused {
+            return "外部修改冲突 · 自动保存已暂停 · 请另存为".to_owned();
+        }
         let count = self.stroke_count();
         if self.is_dirty() {
-            format!("未保存更改 · 会话笔迹 {count} 笔")
+            if self.saved_target.is_none()
+                && self.saving.copy.is_some()
+                && self.saving.copied_revision == self.revision().current
+            {
+                format!("草稿副本已自动保存 · 尚未命名 · 会话笔迹 {count} 笔")
+            } else {
+                format!("未保存更改 · 会话笔迹 {count} 笔")
+            }
         } else if self.is_loaded() || self.saved_target.is_some() {
             "PDF 文档".to_owned()
         } else {

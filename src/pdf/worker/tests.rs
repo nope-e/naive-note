@@ -21,6 +21,7 @@ fn worker_saves_draft_revisions_detects_conflicts_and_can_save_as() {
         document_id,
         path,
         tracked_target,
+        require_new_target: false,
     };
     let (send, received) = mpsc::channel();
     let worker = PdfWorker::new(move |response| {
@@ -70,7 +71,16 @@ fn worker_saves_draft_revisions_detects_conflicts_and_can_save_as() {
     let PdfResponse::Saved(failed) = received.recv_timeout(Duration::from_secs(5)).unwrap() else {
         panic!("expected save");
     };
-    assert!(failed.result.is_err());
+    assert!(matches!(failed.result, Err(error) if error.conflict));
+    assert_eq!(fs::read(&path).unwrap(), b"external edit");
+    let mut collision = snapshot(path.clone(), None, 3, vec![stroke.clone()]);
+    collision.require_new_target = true;
+    worker.save(collision).unwrap();
+    let PdfResponse::Saved(collision) = received.recv_timeout(Duration::from_secs(5)).unwrap()
+    else {
+        panic!("expected save conflict");
+    };
+    assert!(matches!(collision.result, Err(error) if error.conflict));
     assert_eq!(fs::read(&path).unwrap(), b"external edit");
     let copy = directory.join("copy.pdf");
     worker

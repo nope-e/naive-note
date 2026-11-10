@@ -19,6 +19,7 @@ fn workspace() -> CanvasWorkspace {
         save_requested: None,
         exit_requested: false,
         transition: DocumentTransition::default(),
+        persistence: WorkspacePersistence::default(),
     }
 }
 
@@ -157,4 +158,194 @@ fn exit_waits_for_saved_edits_including_changes_made_after_the_first_snapshot() 
     assert!(!workspace.transition.is_pending());
     fs::remove_file(path).unwrap();
     fs::remove_dir(directory).unwrap();
+}
+
+struct AutosaveFixture {
+    workspace: CanvasWorkspace,
+    responses: std::sync::mpsc::Receiver<PdfResponse>,
+    root: PathBuf,
+}
+
+impl AutosaveFixture {
+    fn new() -> Self {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".scratch")
+            .join(format!("autosave-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("drafts")).unwrap();
+        let (sender, responses) = std::sync::mpsc::channel();
+        let mut workspace = workspace();
+        workspace.document = CanvasDocument::with_worker(
+            PdfWorker::new(move |response| {
+                let _ = sender.send(response);
+            })
+            .unwrap(),
+        );
+        workspace.document.set_draft_directory(root.join("drafts"));
+        Self {
+            workspace,
+            responses,
+            root,
+        }
+    }
+
+    fn receive(&mut self) {
+        let response = self
+            .responses
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        self.workspace.pdf_response(response);
+    }
+
+    fn tick(&mut self) -> bool {
+        self.workspace
+            .maintenance(self.workspace.autosave_deadline())
+    }
+}
+
+impl Drop for AutosaveFixture {
+    fn drop(&mut self) {
+        // Wait for queued work before removing only files inside this fixture.
+        self.workspace.document = CanvasDocument::with_worker(PdfWorker::new(|_| {}).unwrap());
+        for directory in [self.root.join("drafts"), self.root.clone()] {
+            for entry in std::fs::read_dir(directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_file() {
+                    std::fs::remove_file(path).unwrap();
+                }
+            }
+        }
+        std::fs::remove_dir(self.root.join("drafts")).unwrap();
+        std::fs::remove_dir(&self.root).unwrap();
+    }
+}
+
+#[test]
+fn autosave_keeps_active_ink_does_not_queue_and_draft_still_requires_a_name() {
+    let mut fixture = AutosaveFixture::new();
+    assert!(!fixture.tick()); // Empty drafts never write a recovery PDF.
+    add(&mut fixture.workspace);
+    let viewport = CanvasViewport::new(Rect::new(0., 0., 900., 700.), 1., (900, 700)).unwrap();
+    fixture.workspace.view.update_viewport(viewport);
+    fixture.workspace.mouse_button(
+        true,
+        Some(viewport.logical.center()),
+        egui::Modifiers::NONE,
+        false,
+    );
+    assert!(fixture.workspace.input.is_drawing());
+    assert!(fixture.tick());
+    assert!(fixture.workspace.input.is_drawing());
+    assert!(fixture.workspace.take_save_request().is_none());
+    assert!(!fixture.tick()); // One save in flight, even across another period.
+    add(&mut fixture.workspace);
+    fixture.receive();
+    assert!(fixture.workspace.document.is_dirty());
+    assert!(fixture.workspace.document.save_path().is_none());
+    assert!(fixture.workspace.document.can_undo());
+    assert!(fixture.workspace.input.is_drawing());
+    assert!(fixture.tick()); // The newer completed revision still needs saving.
+    fixture.receive();
+    assert!(!fixture.tick()); // Identical revision: no I/O and no response.
+    assert!(fixture.responses.try_recv().is_err());
+    let copies: Vec<_> = std::fs::read_dir(fixture.root.join("drafts"))
+        .unwrap()
+        .collect();
+    assert_eq!(copies.len(), 1);
+    fixture.workspace.request_save(false);
+    assert!(!fixture.workspace.input.is_drawing());
+    assert!(fixture.workspace.take_save_request().is_some());
+    fixture
+        .workspace
+        .save_dialog_result(Some(fixture.root.join("named.pdf")));
+    fixture.receive(); // Formal PDF save.
+    fixture.receive(); // Serialized recovery-copy cleanup.
+    assert!(!fixture.workspace.document.is_dirty());
+    assert_eq!(
+        std::fs::read_dir(fixture.root.join("drafts"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert!(fixture.workspace.document.can_undo());
+    fixture.workspace.document.undo();
+    assert!(fixture.tick());
+    fixture.receive();
+    assert!(!fixture.workspace.document.is_dirty());
+}
+
+#[test]
+fn named_autosave_conflict_pauses_until_save_as_and_follows_the_new_path() {
+    let mut fixture = AutosaveFixture::new();
+    let first = fixture.root.join("first.pdf");
+    add(&mut fixture.workspace);
+    fixture.workspace.save_dialog_result(Some(first.clone()));
+    fixture.receive();
+    add(&mut fixture.workspace);
+    assert!(fixture.tick());
+    add(&mut fixture.workspace); // New revision must not be acknowledged by this save.
+    fixture.receive();
+    assert!(fixture.workspace.document.is_dirty());
+    std::fs::write(&first, b"external edit").unwrap();
+    assert!(fixture.tick());
+    fixture.receive();
+    assert!(
+        fixture
+            .workspace
+            .document
+            .subtitle()
+            .contains("自动保存已暂停")
+    );
+    fixture.workspace.document.dismiss_notice();
+    assert!(!fixture.tick());
+    assert_eq!(std::fs::read(&first).unwrap(), b"external edit");
+    assert!(fixture.workspace.document.is_dirty());
+    let second = fixture.root.join("second.pdf");
+    fixture.workspace.save_dialog_result(Some(second.clone()));
+    fixture.receive();
+    assert!(!fixture.workspace.document.is_dirty());
+    add(&mut fixture.workspace);
+    assert!(fixture.tick());
+    fixture.receive();
+    assert_eq!(
+        fixture.workspace.document.save_path(),
+        Some(second.as_path())
+    );
+    assert!(!fixture.workspace.document.is_dirty());
+    assert_eq!(std::fs::read(first).unwrap(), b"external edit");
+    let bytes = std::fs::read(second).unwrap();
+    let pdf = mupdf::pdf::PdfDocument::from_bytes(&bytes).unwrap();
+    assert_eq!(pdf.load_pdf_page(0).unwrap().annotations().count(), 4);
+}
+
+#[test]
+fn autosave_retries_io_failures_and_corrupt_recovery_keeps_the_current_document() {
+    let mut fixture = AutosaveFixture::new();
+    let drafts = fixture.root.join("drafts");
+    std::fs::remove_dir(&drafts).unwrap();
+    add(&mut fixture.workspace);
+    assert!(fixture.tick());
+    fixture.receive();
+    assert!(fixture.workspace.document.is_dirty());
+    assert!(fixture.workspace.document.notice().is_some());
+    std::fs::create_dir(&drafts).unwrap();
+    assert!(fixture.tick()); // Ordinary I/O failures retry at the next interval.
+    fixture.receive();
+    assert!(!fixture.tick());
+    let corrupt = drafts.join(format!("{}.pdf", uuid::Uuid::new_v4()));
+    std::fs::write(&corrupt, b"not a PDF").unwrap();
+    fixture.workspace.document.recover(corrupt.clone());
+    fixture.receive();
+    assert!(fixture.workspace.document.can_undo());
+    assert!(fixture.workspace.document.is_dirty());
+    assert!(
+        fixture
+            .workspace
+            .document
+            .notice()
+            .unwrap()
+            .contains("打开失败")
+    );
+    fixture.workspace.document.remove_draft(corrupt.clone());
+    fixture.receive();
+    assert!(!corrupt.exists());
 }

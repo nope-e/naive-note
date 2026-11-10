@@ -5,6 +5,7 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum DocumentAction {
     Open(PathBuf),
+    Recover(PathBuf),
     Close,
     Exit,
 }
@@ -71,7 +72,7 @@ impl DocumentTransition {
     ) -> Option<TransitionDecision> {
         let action = self.pending.as_ref()?;
         let verb = match action {
-            DocumentAction::Open(_) => "打开其他文档",
+            DocumentAction::Open(_) | DocumentAction::Recover(_) => "打开其他文档",
             DocumentAction::Close => "关闭文档",
             DocumentAction::Exit => "退出应用",
         };

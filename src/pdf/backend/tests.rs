@@ -352,6 +352,7 @@ fn worker_saves_snapshot_and_keeps_the_immutable_preview_session_available() {
             document_id: uuid::Uuid::new_v4(),
             path: directory.join("saved.pdf"),
             tracked_target: Some((source.clone(), crate::storage::FileFingerprint::of(&bytes))),
+            require_new_target: false,
         })
         .unwrap();
     let output = match receiver.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -427,6 +428,7 @@ fn saving_a_closed_session_returns_an_error_without_creating_output() {
             document_id: uuid::Uuid::new_v4(),
             path: output.clone(),
             tracked_target: None,
+            require_new_target: false,
         })
         .unwrap();
     release.send(()).unwrap();

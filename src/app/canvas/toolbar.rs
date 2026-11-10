@@ -27,6 +27,8 @@ pub(super) enum ToolbarAction {
     MousePen,
     Smoothing,
     DismissNotice,
+    AutosaveInterval(u64),
+    RecoverDrafts,
     Color([u8; 3]),
     Width(f64),
     PressureGamma(f64),
@@ -43,6 +45,8 @@ pub(super) struct DocumentActions {
     pub tool: CanvasTool,
     pub mouse_pen: bool,
     pub smoothing: bool,
+    pub autosave_seconds: u64,
+    pub recovery_count: usize,
 }
 
 pub(super) struct ToolbarContext<'a> {

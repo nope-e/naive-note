@@ -143,6 +143,12 @@ impl ApplicationHandler<UserEvent> for Application {
                     runtime.request_repaint();
                 }
             }
+            UserEvent::StorageResponse(response) => {
+                if let Some(runtime) = self.runtime.as_mut() {
+                    runtime.canvas.storage_response(*response);
+                    runtime.request_repaint();
+                }
+            }
         }
     }
 
@@ -152,6 +158,12 @@ impl ApplicationHandler<UserEvent> for Application {
             return;
         };
         runtime.drain_pen();
+        let now = Instant::now();
+        if runtime.canvas.maintenance(now) {
+            runtime.request_repaint();
+        }
+        let autosave_at = runtime.canvas.autosave_deadline();
+        event_loop.set_control_flow(ControlFlow::WaitUntil(autosave_at));
         if !runtime.can_draw() {
             runtime.frame_rate.reset();
             runtime.frames.cancel_repaint();
@@ -163,7 +175,7 @@ impl ApplicationHandler<UserEvent> for Application {
                 // inside draw: Windows uses the UI thread for native move/resize.
                 runtime.window.window.request_redraw();
             } else {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(at));
+                event_loop.set_control_flow(ControlFlow::WaitUntil(at.min(autosave_at)));
             }
         }
     }

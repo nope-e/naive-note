@@ -50,6 +50,8 @@ pub struct SaveSnapshot {
     pub path: PathBuf,
     /// Most recent successful save, or the file bytes at open time.
     pub tracked_target: Option<(PathBuf, FileFingerprint)>,
+    /// A new recovery copy must never adopt an existing file as its baseline.
+    pub require_new_target: bool,
 }
 
 pub struct SavedPdf {
@@ -61,7 +63,34 @@ pub struct SaveResponse {
     pub document: Option<u64>,
     pub request: u64,
     pub revision: u64,
-    pub result: Result<SavedPdf, String>,
+    pub result: Result<SavedPdf, SaveError>,
+}
+
+#[derive(Debug)]
+pub struct SaveError {
+    pub message: String,
+    pub conflict: bool,
+}
+
+impl std::fmt::Display for SaveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<String> for SaveError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            conflict: false,
+        }
+    }
+}
+
+impl From<&str> for SaveError {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
 }
 
 pub struct OpenResponse {
@@ -82,4 +111,8 @@ pub enum PdfResponse {
     Opened(OpenResponse),
     Tiles(TileResponse),
     Saved(SaveResponse),
+    DraftRemoved {
+        path: PathBuf,
+        result: Result<(), String>,
+    },
 }
