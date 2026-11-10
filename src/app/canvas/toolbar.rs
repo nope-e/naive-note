@@ -19,6 +19,8 @@ use super::{ink_input::CanvasTool, view::ViewAction};
 pub(super) enum ToolbarAction {
     Open,
     Close,
+    Undo,
+    Redo,
     DemoStroke,
     ExportDemo,
     Tool(CanvasTool),
@@ -33,6 +35,8 @@ pub(super) enum ToolbarAction {
 
 pub(super) struct DocumentActions {
     pub can_close: bool,
+    pub can_undo: bool,
+    pub can_redo: bool,
     pub can_demo: bool,
     pub can_export_demo: bool,
     pub current_page: u32,
@@ -66,7 +70,9 @@ impl WorkspaceToolbar {
         context: &ToolbarContext<'_>,
         process_input: bool,
     ) -> Option<ToolbarAction> {
-        let mut action = shortcuts(ui, context.document.page_count);
+        let mut action = process_input
+            .then(|| shortcuts(ui, &context.document))
+            .flatten();
         self.header(ui, context, &mut action, process_input);
         if !self.focus_mode {
             self.sidebar(ui, context, &mut action);
@@ -122,10 +128,24 @@ impl WorkspaceToolbar {
     }
 }
 
-fn shortcuts(ui: &egui::Ui, page_count: u32) -> Option<ToolbarAction> {
+fn shortcuts(ui: &egui::Ui, document: &DocumentActions) -> Option<ToolbarAction> {
     let editing_text = ui.ctx().text_edit_focused();
     ui.input(|input| {
-        if input.modifiers.ctrl && input.key_pressed(egui::Key::O) {
+        if !editing_text
+            && input.modifiers.ctrl
+            && !input.modifiers.alt
+            && ((input.modifiers.shift && input.key_pressed(egui::Key::Z))
+                || input.key_pressed(egui::Key::Y))
+        {
+            document.can_redo.then_some(ToolbarAction::Redo)
+        } else if !editing_text
+            && input.modifiers.ctrl
+            && !input.modifiers.alt
+            && !input.modifiers.shift
+            && input.key_pressed(egui::Key::Z)
+        {
+            document.can_undo.then_some(ToolbarAction::Undo)
+        } else if input.modifiers.ctrl && input.key_pressed(egui::Key::O) {
             Some(ToolbarAction::Open)
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::W) {
             Some(ToolbarAction::Close)
@@ -143,7 +163,7 @@ fn shortcuts(ui: &egui::Ui, page_count: u32) -> Option<ToolbarAction> {
             Some(ToolbarAction::View(ViewAction::GoToPage(0)))
         } else if !editing_text && input.key_pressed(egui::Key::End) {
             Some(ToolbarAction::View(ViewAction::GoToPage(
-                page_count.saturating_sub(1),
+                document.page_count.saturating_sub(1),
             )))
         } else {
             None

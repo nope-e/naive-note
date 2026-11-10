@@ -52,9 +52,19 @@ impl ApplicationHandler<UserEvent> for Application {
             return;
         }
         runtime.drain_pen();
-        if matches!(event, WindowEvent::CloseRequested | WindowEvent::Destroyed) {
+        if matches!(event, WindowEvent::Destroyed) {
             runtime.cancel_input();
             event_loop.exit();
+            return;
+        }
+        if matches!(event, WindowEvent::CloseRequested) {
+            runtime.cancel_input();
+            runtime.canvas.request_exit();
+            if runtime.canvas.take_exit_request() {
+                event_loop.exit();
+            } else {
+                runtime.request_repaint();
+            }
             return;
         }
 

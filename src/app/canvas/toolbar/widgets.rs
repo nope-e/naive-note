@@ -74,7 +74,11 @@ pub(super) fn menu_row(
         response
     })
     .inner
-    .on_disabled_hover_text("暂未接入")
+    .on_disabled_hover_text(match icon {
+        Icon::Undo => "当前没有可撤销的会话编辑",
+        Icon::Redo => "当前没有可重做的会话编辑",
+        _ => "暂未接入",
+    })
 }
 
 pub(super) fn choice(

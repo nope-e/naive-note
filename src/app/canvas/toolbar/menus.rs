@@ -53,6 +53,27 @@ pub(super) fn main_menu(
             );
             ui.add_space(5.0);
             ui.separator();
+            widgets::section(ui, "编辑");
+            command(
+                ui,
+                Icon::Undo,
+                "撤销",
+                "Ctrl+Z",
+                context.document.can_undo,
+                ToolbarAction::Undo,
+                action,
+            );
+            command(
+                ui,
+                Icon::Redo,
+                "重做",
+                "Ctrl+Y",
+                context.document.can_redo,
+                ToolbarAction::Redo,
+                action,
+            );
+            ui.add_space(5.0);
+            ui.separator();
             widgets::menu_row(ui, Icon::Download, "导出…", "", false);
             widgets::menu_row(ui, Icon::Print, "打印文档", "Ctrl+P", false);
             ui.add_space(5.0);

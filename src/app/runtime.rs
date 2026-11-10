@@ -76,7 +76,7 @@ impl Runtime {
         let mut process_input = true;
         let size = self.window.window.inner_size();
         let fps = self.frame_rate.fps();
-        self.close_requested = self.renderer.draw(&self.window, |ui| {
+        let close_requested = self.renderer.draw(&self.window, |ui| {
             let scene = self.canvas.show(
                 ui,
                 show_renderer_info,
@@ -87,6 +87,12 @@ impl Runtime {
             process_input = false;
             scene
         })?;
+        if close_requested {
+            self.cancel_input();
+            self.canvas.request_exit();
+            self.request_repaint();
+        }
+        self.close_requested = self.canvas.take_exit_request();
         if show_renderer_info {
             self.frame_rate.frame_presented();
             self.request_repaint();

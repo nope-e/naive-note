@@ -11,7 +11,8 @@ impl CanvasDocument {
 
     pub fn can_export_demo(&self) -> bool {
         self.can_demo()
-            && self.strokes.is_empty()
+            && self.stroke_count() == 0
+            && !self.is_dirty()
             && self
                 .loaded
                 .as_ref()

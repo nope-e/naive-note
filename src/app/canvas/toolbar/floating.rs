@@ -231,8 +231,28 @@ impl WorkspaceToolbar {
                         icons::button(ui, icon, label, false, false);
                     }
                     icons::separator(ui);
-                    icons::button(ui, Icon::Undo, "撤销", false, false);
-                    icons::button(ui, Icon::Redo, "重做", false, false);
+                    if icons::button(
+                        ui,
+                        Icon::Undo,
+                        "撤销 · Ctrl+Z",
+                        false,
+                        state.document.can_undo,
+                    )
+                    .clicked()
+                    {
+                        *action = Some(ToolbarAction::Undo);
+                    }
+                    if icons::button(
+                        ui,
+                        Icon::Redo,
+                        "重做 · Ctrl+Y / Ctrl+Shift+Z",
+                        false,
+                        state.document.can_redo,
+                    )
+                    .clicked()
+                    {
+                        *action = Some(ToolbarAction::Redo);
+                    }
                 });
             },
         );

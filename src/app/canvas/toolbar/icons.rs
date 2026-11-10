@@ -62,7 +62,9 @@ pub(super) fn paint(ui: &egui::Ui, rect: Rect, icon: Icon, color: Color32) {
         Icon::Previous => egui::include_image!("../../../../assets/icons/lucide/chevron-left.svg"),
         Icon::Next => egui::include_image!("../../../../assets/icons/lucide/chevron-right.svg"),
         Icon::Hand => egui::include_image!("../../../../assets/icons/lucide/hand.svg"),
-        Icon::RotateClockwise => egui::include_image!("../../../../assets/icons/lucide/rotate-cw.svg"),
+        Icon::RotateClockwise => {
+            egui::include_image!("../../../../assets/icons/lucide/rotate-cw.svg")
+        }
         Icon::Minimize | Icon::Minus => {
             egui::include_image!("../../../../assets/icons/lucide/minus.svg")
         }
@@ -113,7 +115,11 @@ pub(super) fn button(
     })
     .inner
     .on_hover_text(label)
-    .on_disabled_hover_text(format!("{label} · 暂未接入"))
+    .on_disabled_hover_text(match icon {
+        Icon::Undo => "当前没有可撤销的会话编辑".to_owned(),
+        Icon::Redo => "当前没有可重做的会话编辑".to_owned(),
+        _ => format!("{label} · 暂未接入"),
+    })
 }
 
 pub(super) fn separator(ui: &mut egui::Ui) {

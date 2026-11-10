@@ -6,7 +6,10 @@ mod ink_input;
 mod pdf_preview;
 mod scrollbars;
 mod status_bar;
+#[cfg(test)]
+mod tests;
 mod toolbar;
+mod transition;
 mod view;
 
 use std::path::PathBuf;
@@ -16,6 +19,7 @@ use area::CanvasArea;
 use document::CanvasDocument;
 use ink_input::CanvasInput;
 use toolbar::{ToolbarAction, WorkspaceToolbar};
+use transition::{DocumentAction, DocumentTransition};
 use view::CanvasView;
 use winit::event_loop::EventLoopProxy;
 
@@ -30,6 +34,8 @@ pub(super) struct CanvasWorkspace {
     input: CanvasInput,
     toolbar: WorkspaceToolbar,
     open_requested: bool,
+    exit_requested: bool,
+    transition: DocumentTransition,
 }
 
 impl CanvasWorkspace {
@@ -41,12 +47,39 @@ impl CanvasWorkspace {
             input: CanvasInput::for_editor(),
             toolbar: WorkspaceToolbar::default(),
             open_requested: false,
+            exit_requested: false,
+            transition: DocumentTransition::default(),
         })
     }
 
     pub fn open_pdf(&mut self, path: PathBuf) {
+        self.request_transition(DocumentAction::Open(path));
+    }
+
+    pub fn request_exit(&mut self) {
+        self.request_transition(DocumentAction::Exit);
+    }
+
+    pub fn take_exit_request(&mut self) -> bool {
+        std::mem::take(&mut self.exit_requested)
+    }
+
+    fn request_transition(&mut self, action: DocumentAction) {
         self.input.cancel_drawing();
-        self.document.open(path);
+        if let Some(action) = self
+            .transition
+            .request(action, self.document.needs_discard_confirmation())
+        {
+            self.apply_transition(action);
+        }
+    }
+
+    fn apply_transition(&mut self, action: DocumentAction) {
+        match action {
+            DocumentAction::Open(path) => self.document.open(path),
+            DocumentAction::Close => self.close_pdf(),
+            DocumentAction::Exit => self.exit_requested = true,
+        }
     }
 
     pub fn pdf_response(&mut self, response: PdfResponse) {
@@ -73,11 +106,11 @@ impl CanvasWorkspace {
     }
 
     pub fn pen_sample(&mut self, event: crate::platform::PenEvent, over_ui: bool) -> bool {
-        self.input.ui_blocked = over_ui;
+        self.input.ui_blocked = over_ui || self.transition.is_pending();
         let (ui_owned, stroke) = self.input.pen(
             event.sample,
             &mut self.view,
-            self.document.can_ink(),
+            self.document.can_ink() && !self.transition.is_pending(),
             event.modifiers,
         );
         if let Some(stroke) = stroke {
@@ -93,12 +126,12 @@ impl CanvasWorkspace {
         modifiers: egui::Modifiers,
         over_ui: bool,
     ) -> bool {
-        self.input.ui_blocked = over_ui;
+        self.input.ui_blocked = over_ui || self.transition.is_pending();
         let (owned, stroke) = self.input.mouse_button(
             down,
             position,
             &mut self.view,
-            self.document.can_ink(),
+            self.document.can_ink() && !self.transition.is_pending(),
             modifiers,
         );
         if let Some(stroke) = stroke {
@@ -134,6 +167,7 @@ impl CanvasWorkspace {
         );
         let title = self.document.title();
         let subtitle = self.document.subtitle();
+        let interact = process_input && !self.transition.is_pending();
         let mut action = self.toolbar.show(
             ui,
             &toolbar::ToolbarContext {
@@ -145,6 +179,8 @@ impl CanvasWorkspace {
                 style: &self.input.style,
                 document: toolbar::DocumentActions {
                     can_close: self.document.can_close(),
+                    can_undo: self.document.can_undo(),
+                    can_redo: self.document.can_redo(),
                     can_demo: self.document.can_demo(),
                     can_export_demo: self.document.can_export_demo(),
                     current_page: self.view.current_page(),
@@ -154,9 +190,9 @@ impl CanvasWorkspace {
                     smoothing: self.input.smoothing,
                 },
             },
-            process_input,
+            interact,
         );
-        if process_input {
+        if interact {
             if action.is_some() {
                 ui.ctx().request_repaint();
             }
@@ -180,7 +216,15 @@ impl CanvasWorkspace {
                     action = None;
                 }
                 Some(ToolbarAction::Close) => {
-                    self.close_pdf();
+                    self.request_transition(DocumentAction::Close);
+                    action = None;
+                }
+                Some(ToolbarAction::Undo) => {
+                    self.document.undo();
+                    action = None;
+                }
+                Some(ToolbarAction::Redo) => {
+                    self.document.redo();
                     action = None;
                 }
                 Some(ToolbarAction::DemoStroke) => {
@@ -251,7 +295,7 @@ impl CanvasWorkspace {
             .show(
                 ui,
                 framebuffer,
-                process_input && !self.input.is_drawing(),
+                process_input && !self.input.is_drawing() && !self.transition.is_pending(),
                 &mut self.view,
                 view_action,
             )
@@ -272,6 +316,18 @@ impl CanvasWorkspace {
                 }
                 scene
             });
+
+        // Render the modal last so it blocks all other UI. Apply a decision only
+        // on the input pass: egui can repeat layout within the same frame.
+        if let Some(discard) = self.transition.show(ui.ctx(), &title)
+            && process_input
+        {
+            self.input.cancel_drawing();
+            if let Some(action) = self.transition.resolve(discard) {
+                self.apply_transition(action);
+            }
+            ui.ctx().request_repaint();
+        }
 
         // Refresh toolbar/status readouts after canvas input changes the view.
         if before

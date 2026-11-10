@@ -1,15 +1,17 @@
 //! PDF lifecycle, worker responses and preview state for the current workspace.
 
 mod probe;
+#[cfg(test)]
+mod tests;
 
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Result;
 use winit::event_loop::EventLoopProxy;
 
 use crate::{
     app::UserEvent,
-    document::{PageGeometry, StrokeRecord},
+    document::{DocumentRevision, EditCommand, EditHistory, PageGeometry, StrokeRecord},
     pdf::{LoadedPdf, OpenResponse, PdfResponse, PdfWorker},
     render::CanvasScene,
 };
@@ -30,7 +32,7 @@ pub(super) struct CanvasDocument {
     notice: Option<String>,
     pending_export: Option<(u64, u64)>,
     loaded_request: Option<u64>,
-    strokes: BTreeMap<u32, Vec<Arc<StrokeRecord>>>,
+    edits: EditHistory,
 }
 
 impl CanvasDocument {
@@ -38,7 +40,11 @@ impl CanvasDocument {
         let worker = PdfWorker::new(move |response| {
             let _ = proxy.send_event(UserEvent::PdfResponse(Box::new(response)));
         })?;
-        Ok(Self {
+        Ok(Self::with_worker(worker))
+    }
+
+    pub(super) fn with_worker(worker: PdfWorker) -> Self {
+        Self {
             worker,
             loaded: None,
             pending: None,
@@ -46,8 +52,8 @@ impl CanvasDocument {
             notice: None,
             pending_export: None,
             loaded_request: None,
-            strokes: BTreeMap::new(),
-        })
+            edits: EditHistory::default(),
+        }
     }
 
     pub fn open(&mut self, path: PathBuf) {
@@ -103,7 +109,7 @@ impl CanvasDocument {
         self.pending = None;
         match response.result {
             Ok(pdf) => {
-                self.strokes.clear();
+                self.edits = EditHistory::default();
                 let pages = pdf.pages.clone();
                 self.message = Some(format!(
                     "{} | {} | Continuous reading",
@@ -134,7 +140,7 @@ impl CanvasDocument {
         self.notice = None;
         self.pending_export = None;
         self.loaded_request = None;
-        self.strokes.clear();
+        self.edits = EditHistory::default();
     }
 
     pub fn can_ink(&self) -> bool {
@@ -142,22 +148,69 @@ impl CanvasDocument {
     }
 
     pub fn add_stroke(&mut self, stroke: Arc<StrokeRecord>) {
-        self.strokes
-            .entry(stroke.page_index)
-            .or_default()
-            .push(stroke);
+        if self.edits.execute(EditCommand::AddStroke(stroke)) {
+            self.edit_changed();
+        }
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.can_ink() && self.edits.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.can_ink() && self.edits.can_redo()
+    }
+
+    pub fn undo(&mut self) {
+        if self.can_undo() && self.edits.undo() {
+            self.edit_changed();
+        }
+    }
+
+    pub fn redo(&mut self) {
+        if self.can_redo() && self.edits.redo() {
+            self.edit_changed();
+        }
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.revision().is_dirty()
+    }
+
+    pub fn needs_discard_confirmation(&self) -> bool {
+        // Starting an open already required permission to replace dirty edits.
+        // While it runs, editing is blocked and a close/exit can cancel it.
+        self.is_dirty() && self.pending.is_none()
+    }
+
+    fn revision(&self) -> DocumentRevision {
+        self.edits.revision()
+    }
+
+    fn edit_changed(&mut self) {
+        let revision = self.revision();
         self.message = Some(format!(
-            "{} session stroke(s) | Not saved",
-            self.stroke_count()
+            "{} session stroke(s) | Revision {} | Saved revision {} | {}",
+            self.stroke_count(),
+            revision.current,
+            revision.saved,
+            if revision.is_dirty() {
+                "Unsaved changes"
+            } else {
+                "No unsaved changes"
+            },
         ));
     }
 
     fn stroke_count(&self) -> usize {
-        self.strokes.values().map(Vec::len).sum()
+        self.edits.stroke_count()
     }
 
     pub fn can_close(&self) -> bool {
-        self.loaded.is_some() || self.pending.is_some()
+        self.loaded.is_some()
+            || self.pending.is_some()
+            || self.edits.can_undo()
+            || self.edits.can_redo()
     }
 
     pub fn is_loaded(&self) -> bool {
@@ -169,12 +222,18 @@ impl CanvasDocument {
             || "Test page 1 / 1".to_owned(),
             |loaded| format!("PDF page {} / {}", page + 1, loaded.pdf.page_count),
         );
-        let count = self.stroke_count();
-        if count > 0 {
-            format!("{label} | {count} unsaved stroke(s)")
-        } else {
-            label
-        }
+        let revision = self.revision();
+        format!(
+            "{label} | {} session stroke(s) | r{} / saved r{}{}",
+            self.stroke_count(),
+            revision.current,
+            revision.saved,
+            if self.is_dirty() {
+                " | Unsaved changes"
+            } else {
+                ""
+            }
+        )
     }
 
     pub fn message(&self) -> Option<&str> {
@@ -217,8 +276,8 @@ impl CanvasDocument {
             return "正在导出测试 PDF…".to_owned();
         }
         let count = self.stroke_count();
-        if count > 0 {
-            format!("草稿 · {count} 笔未保存")
+        if self.is_dirty() {
+            format!("未保存更改 · 会话笔迹 {count} 笔")
         } else if self.is_loaded() {
             "PDF 文档".to_owned()
         } else {
@@ -233,9 +292,7 @@ impl CanvasDocument {
         current_page: u32,
     ) {
         for page in &mut scene.pages {
-            if let Some(strokes) = self.strokes.get(&page.index) {
-                page.strokes = strokes.clone();
-            }
+            page.strokes = self.edits.strokes(page.index).to_vec();
         }
         if let Some(loaded) = self.loaded.as_mut() {
             if let Some(first) = scene.pages.iter_mut().find(|page| page.index == 0) {
