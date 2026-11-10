@@ -444,8 +444,16 @@ fn validate_stroke(stroke: &StrokeRecord, geometry: PageGeometry) -> Result<()> 
         "Unsupported stroke coordinates"
     );
     for sample in &stroke.modeled_samples {
+        // A stroke keeps its complete trajectory when it leaves its page and
+        // re-enters. Skia clips to the paper and the PDF retains its CropBox;
+        // page containment is not a validity requirement for an InkList point.
+        let pdf = geometry.paper_to_pdf(sample.position);
         ensure!(
-            geometry.contains_paper(sample.position) && (0.0..=1.0).contains(&sample.pressure),
+            sample.position.is_finite()
+                && pdf.is_finite()
+                && pdf.x.abs() < 1e9
+                && pdf.y.abs() < 1e9
+                && (0.0..=1.0).contains(&sample.pressure),
             "Invalid modeled sample"
         );
     }

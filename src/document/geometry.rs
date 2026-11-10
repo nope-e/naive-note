@@ -183,6 +183,7 @@ impl PageGeometry {
         )
     }
 
+    #[cfg(test)]
     pub fn contains_paper(self, paper: Point) -> bool {
         let size = self.paper_size();
         Rect::new(0.0, 0.0, size.width, size.height).contains(paper)

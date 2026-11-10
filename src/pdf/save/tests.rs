@@ -242,6 +242,87 @@ fn draft_serializes_its_original_paper_geometry_and_squared_background() {
 }
 
 #[test]
+fn strokes_can_leave_the_page_and_return_without_changing_samples_on_save() {
+    use crate::{
+        document::{CanvasViewport, PenPhase, PenStyle, Rect, ViewTransform},
+        ink::{LiveStroke, StrokeTarget},
+    };
+    let directory = TestDirectory::new();
+    for rotation in [0, 90, 180, 270] {
+        let base = fixture(rotation);
+        let document = PdfDocument::from_bytes(&base).unwrap();
+        let geometry = page_geometry(&document.load_pdf_page(0).unwrap()).unwrap();
+        let size = geometry.paper_size();
+        let target = StrokeTarget {
+            page_index: 0,
+            original: geometry,
+            displayed: geometry,
+            view: ViewTransform::default(),
+            viewport: CanvasViewport::new(Rect::new(0., 0., 1600., 1600.), 1., (1600, 1600))
+                .unwrap(),
+        };
+        for smoothing in [false, true] {
+            let mut live = LiveStroke::new(target, smoothing, PenStyle::default());
+            // Start inside, cross every edge, then return to the original page.
+            let positions = [
+                Point::new(30., 40.),
+                Point::new(-40., 50.),
+                Point::new(40., 60.),
+                Point::new(50., -40.),
+                Point::new(60., 70.),
+                Point::new(size.width + 40., 80.),
+                Point::new(size.width - 30., 90.),
+                Point::new(100., size.height + 40.),
+                Point::new(110., size.height - 30.),
+            ];
+            for (index, point) in positions.into_iter().enumerate() {
+                let phase = if index == 0 {
+                    PenPhase::Down
+                } else if index == positions.len() - 1 {
+                    PenPhase::Up
+                } else {
+                    PenPhase::Move
+                };
+                live.push_mouse(
+                    target
+                        .viewport
+                        .logical_to_physical(target.view.paper_to_logical(point)),
+                    index as u64 * 100_000,
+                    phase,
+                );
+            }
+            let stroke = live.finish().unwrap();
+            assert_eq!(stroke.processing.modeler.is_some(), smoothing);
+            assert!(
+                stroke
+                    .raw_samples
+                    .iter()
+                    .any(|sample| !geometry.contains_paper(sample.position))
+            );
+            assert!(
+                stroke
+                    .modeled_samples
+                    .iter()
+                    .any(|sample| !geometry.contains_paper(sample.position))
+            );
+            let output = directory.file(&format!("crossing-{rotation}-{smoothing}.pdf"));
+            save_stroke(&base, &stroke, &output).unwrap();
+            let bytes = fs::read(output).unwrap();
+            let reopened = PdfDocument::from_bytes(&bytes).unwrap();
+            assert_eq!(
+                page_geometry(&reopened.load_pdf_page(0).unwrap()).unwrap(),
+                geometry
+            );
+            let data = read_edit_data(&reopened).unwrap().unwrap();
+            assert_eq!(data.strokes.len(), 1);
+            assert_eq!(data.strokes[0].stroke, *stroke);
+            let (_, resaved) = serialize(&bytes, &[], Uuid::new_v4()).unwrap();
+            assert_eq!(resaved, data);
+        }
+    }
+}
+
+#[test]
 fn pressure_ink_attachment_round_trips_with_rotated_cropped_scaled_pages_and_existing_content() {
     let directory = TestDirectory::new();
     for rotation in [0, 90, 180, 270] {
@@ -504,6 +585,12 @@ fn signed_encrypted_and_invalid_records_are_rejected_before_creating_output() {
     stroke.modeled_samples[0].pressure = f64::NAN;
     assert!(save_stroke(&base, &stroke, &output).is_err());
     assert!(!output.exists());
+    for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e12] {
+        let mut stroke = stroke_for(&base);
+        stroke.modeled_samples[0].position.x = invalid;
+        assert!(save_stroke(&base, &stroke, &output).is_err());
+        assert!(!output.exists());
+    }
 }
 
 #[test]
