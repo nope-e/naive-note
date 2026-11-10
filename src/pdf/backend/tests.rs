@@ -240,7 +240,7 @@ fn worker_refinement_is_superseded_and_preserves_session_after_failed_open() {
     match received.recv_timeout(Duration::from_secs(5)).unwrap() {
         PdfResponse::Tiles(response) => {
             assert_eq!(response.request, newest);
-            assert_eq!(response.document, document);
+            assert_eq!(response.document, Some(document));
             assert_eq!(response.result.unwrap()[0].key.x, 1);
         }
         _ => panic!("expected the latest tile job"),
@@ -319,10 +319,10 @@ fn invalid_pdf_and_empty_document_return_errors() {
 }
 
 #[test]
-fn worker_exports_snapshot_and_keeps_preview_session_available() {
+fn worker_saves_snapshot_and_keeps_the_immutable_preview_session_available() {
     use crate::{
-        ink::demo_stroke,
-        pdf::{PdfResponse, PdfWorker},
+        ink::test_support::pressure_stroke,
+        pdf::{PdfResponse, PdfWorker, SaveSnapshot},
     };
     use std::{sync::mpsc, time::Duration};
 
@@ -344,15 +344,23 @@ fn worker_exports_snapshot_and_keeps_preview_session_available() {
         matches!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), PdfResponse::Opened(response) if response.result.is_ok())
     );
     let request = worker
-        .export_probe(document, Arc::new(demo_stroke(geometry).unwrap()))
+        .save(SaveSnapshot {
+            document: Some(document),
+            revision: 1,
+            strokes: vec![Arc::new(pressure_stroke(geometry).unwrap())],
+            draft_page: geometry,
+            document_id: uuid::Uuid::new_v4(),
+            path: directory.join("saved.pdf"),
+            tracked_target: Some((source.clone(), crate::storage::FileFingerprint::of(&bytes))),
+        })
         .unwrap();
     let output = match receiver.recv_timeout(Duration::from_secs(5)).unwrap() {
-        PdfResponse::Exported(response) => {
+        PdfResponse::Saved(response) => {
             assert_eq!(response.document, document);
             assert_eq!(response.request, request);
-            response.result.unwrap()
+            response.result.unwrap().path
         }
-        _ => panic!("expected PDF export response"),
+        _ => panic!("expected PDF save response"),
     };
     assert_eq!(std::fs::read(&source).unwrap(), bytes);
     let reopened = PdfDocument::from_bytes(&std::fs::read(&output).unwrap()).unwrap();
@@ -361,7 +369,7 @@ fn worker_exports_snapshot_and_keeps_preview_session_available() {
             .unwrap()
             .is_some()
     );
-    // Export does not mutate the current immutable session or stop refinement.
+    // Saving does not mutate the current immutable session or stop refinement.
     worker
         .render(
             document,
@@ -378,24 +386,23 @@ fn worker_exports_snapshot_and_keeps_preview_session_available() {
     );
     drop(worker);
     std::fs::remove_file(&output).unwrap();
-    std::fs::remove_dir(output.parent().unwrap()).unwrap();
     std::fs::remove_file(source).unwrap();
     std::fs::remove_dir(directory).unwrap();
 }
 
 #[test]
-fn close_invalidates_queued_test_export() {
+fn saving_a_closed_session_returns_an_error_without_creating_output() {
     use crate::{
-        ink::demo_stroke,
-        pdf::{PdfResponse, PdfWorker},
+        ink::test_support::pressure_stroke,
+        pdf::{PdfResponse, PdfWorker, SaveSnapshot},
     };
     use std::{sync::mpsc, time::Duration};
-
     let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(".scratch")
-        .join(format!("mupdf-cancel-save-{}", uuid::Uuid::new_v4()));
+        .join(format!("mupdf-closed-save-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&directory).unwrap();
     let source = directory.join("source.pdf");
+    let output = directory.join("saved.pdf");
     let bytes = pdf_bytes("/MediaBox [0 0 200 300]");
     std::fs::write(&source, &bytes).unwrap();
     let geometry = PdfSession::from_bytes(&bytes).unwrap().pages[0];
@@ -410,15 +417,24 @@ fn close_invalidates_queued_test_export() {
     assert!(
         matches!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), PdfResponse::Opened(response) if response.result.is_ok())
     );
-    worker
-        .export_probe(document, Arc::new(demo_stroke(geometry).unwrap()))
-        .unwrap();
     worker.close();
+    worker
+        .save(SaveSnapshot {
+            document: Some(document),
+            revision: 1,
+            strokes: vec![Arc::new(pressure_stroke(geometry).unwrap())],
+            draft_page: geometry,
+            document_id: uuid::Uuid::new_v4(),
+            path: output.clone(),
+            tracked_target: None,
+        })
+        .unwrap();
     release.send(()).unwrap();
-    assert!(matches!(
-        receiver.recv_timeout(Duration::from_millis(150)),
-        Err(mpsc::RecvTimeoutError::Timeout)
-    ));
+    assert!(
+        matches!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), PdfResponse::Saved(response) if response.result.is_err())
+    );
+    assert!(!output.exists());
+    release.send(()).unwrap();
     drop(worker);
     std::fs::remove_file(source).unwrap();
     std::fs::remove_dir(directory).unwrap();

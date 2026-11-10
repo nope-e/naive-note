@@ -3,7 +3,7 @@ use super::*;
 fn stroke(page: u32) -> Arc<StrokeRecord> {
     use crate::document::{PageGeometry, Rect, Rotation};
     let geometry = PageGeometry::new(Rect::new(0.0, 0.0, 600.0, 800.0), Rotation::R0, 1.0).unwrap();
-    let mut stroke = crate::ink::demo_stroke(geometry).unwrap();
+    let mut stroke = crate::ink::test_support::pressure_stroke(geometry).unwrap();
     stroke.page_index = page;
     Arc::new(stroke)
 }

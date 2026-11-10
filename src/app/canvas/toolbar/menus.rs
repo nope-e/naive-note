@@ -40,8 +40,24 @@ pub(super) fn main_menu(
                 ToolbarAction::Open,
                 action,
             );
-            widgets::menu_row(ui, Icon::Save, "保存文档", "Ctrl+S", false);
-            widgets::menu_row(ui, Icon::Save, "另存为", "Ctrl+Shift+S", false);
+            command(
+                ui,
+                Icon::Save,
+                "保存文档",
+                "Ctrl+S",
+                context.document.can_save,
+                ToolbarAction::Save,
+                action,
+            );
+            command(
+                ui,
+                Icon::Save,
+                "另存为",
+                "Ctrl+Shift+S",
+                context.document.can_save,
+                ToolbarAction::SaveAs,
+                action,
+            );
             command(
                 ui,
                 Icon::Close,
@@ -78,27 +94,6 @@ pub(super) fn main_menu(
             widgets::menu_row(ui, Icon::Print, "打印文档", "Ctrl+P", false);
             ui.add_space(5.0);
             ui.separator();
-            ui.menu_button("开发工具", |ui| {
-                ui.set_width(240.0);
-                command(
-                    ui,
-                    Icon::Pen,
-                    "模拟压感笔迹",
-                    "",
-                    context.document.can_demo,
-                    ToolbarAction::DemoStroke,
-                    action,
-                );
-                command(
-                    ui,
-                    Icon::Download,
-                    "导出模拟笔迹测试 PDF",
-                    "",
-                    context.document.can_export_demo,
-                    ToolbarAction::ExportDemo,
-                    action,
-                );
-            });
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new("F12  渲染与坐标信息")

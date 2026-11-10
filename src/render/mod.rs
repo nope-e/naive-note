@@ -1,9 +1,9 @@
 //! Shared-context composition: UI layout -> Skia -> egui -> swap.
 
+mod draft_paper;
 mod fonts;
 mod page;
 mod skia;
-mod test_page;
 
 use std::{sync::Arc, time::Instant};
 
@@ -32,10 +32,9 @@ pub struct PageScene {
     pub view: ViewTransform,
     pub bitmap: Option<Arc<PageBitmap>>,
     pub tiles: Vec<Arc<PageTile>>,
-    pub demo_stroke: Option<Arc<crate::document::StrokeRecord>>,
     pub strokes: Vec<Arc<crate::document::StrokeRecord>>,
     pub active_stroke: Option<crate::ink::ActiveInk>,
-    pub test_page: bool,
+    pub draft_paper: bool,
 }
 
 pub struct Renderer {

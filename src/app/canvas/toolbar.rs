@@ -18,11 +18,11 @@ use super::{ink_input::CanvasTool, view::ViewAction};
 
 pub(super) enum ToolbarAction {
     Open,
+    Save,
+    SaveAs,
     Close,
     Undo,
     Redo,
-    DemoStroke,
-    ExportDemo,
     Tool(CanvasTool),
     MousePen,
     Smoothing,
@@ -35,10 +35,9 @@ pub(super) enum ToolbarAction {
 
 pub(super) struct DocumentActions {
     pub can_close: bool,
+    pub can_save: bool,
     pub can_undo: bool,
     pub can_redo: bool,
-    pub can_demo: bool,
-    pub can_export_demo: bool,
     pub current_page: u32,
     pub page_count: u32,
     pub tool: CanvasTool,
@@ -145,6 +144,12 @@ fn shortcuts(ui: &egui::Ui, document: &DocumentActions) -> Option<ToolbarAction>
             && input.key_pressed(egui::Key::Z)
         {
             document.can_undo.then_some(ToolbarAction::Undo)
+        } else if input.modifiers.ctrl && !input.modifiers.alt && input.key_pressed(egui::Key::S) {
+            document.can_save.then_some(if input.modifiers.shift {
+                ToolbarAction::SaveAs
+            } else {
+                ToolbarAction::Save
+            })
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::O) {
             Some(ToolbarAction::Open)
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::W) {

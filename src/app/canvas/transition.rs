@@ -12,6 +12,15 @@ pub(super) enum DocumentAction {
 #[derive(Default)]
 pub(super) struct DocumentTransition {
     pending: Option<DocumentAction>,
+    waiting_for_save: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum TransitionDecision {
+    Cancel,
+    Save,
+    SaveAs,
+    Discard,
 }
 
 impl DocumentTransition {
@@ -33,10 +42,33 @@ impl DocumentTransition {
     }
 
     pub fn resolve(&mut self, discard: bool) -> Option<DocumentAction> {
+        self.waiting_for_save = false;
         self.pending.take().filter(|_| discard)
     }
 
-    pub fn show(&self, context: &egui::Context, title: &str) -> Option<bool> {
+    pub fn wait_for_save(&mut self) {
+        self.waiting_for_save = true;
+    }
+
+    pub fn save_finished(&mut self, clean_success: bool) -> Option<DocumentAction> {
+        if !std::mem::take(&mut self.waiting_for_save) {
+            return None;
+        }
+        if clean_success {
+            self.resolve(true)
+        } else {
+            None
+        }
+    }
+
+    pub fn show(
+        &self,
+        context: &egui::Context,
+        title: &str,
+        busy: bool,
+        can_save: bool,
+        notice: Option<&str>,
+    ) -> Option<TransitionDecision> {
         let action = self.pending.as_ref()?;
         let verb = match action {
             DocumentAction::Open(_) => "打开其他文档",
@@ -49,31 +81,66 @@ impl DocumentTransition {
                 ui.set_width(360.0_f32.min((context.content_rect().width() - 48.0).max(200.0)));
                 ui.heading("未保存的更改");
                 ui.add_space(8.0);
-                ui.label(format!("「{title}」有未保存的笔迹。{verb}将丢弃这些更改。"));
-                ui.label("当前版本尚不支持保存，可取消并返回文档。");
+                ui.label(format!("是否保存「{title}」的更改后{verb}？"));
+                if busy {
+                    ui.label("正在保存 PDF，请稍候…");
+                }
+                if let Some(notice) = notice {
+                    ui.colored_label(egui::Color32::LIGHT_RED, notice);
+                }
                 ui.add_space(12.0);
                 let mut answer = None;
                 ui.horizontal(|ui| {
                     if ui.button("取消").clicked() {
-                        answer = Some(false);
+                        answer = Some(TransitionDecision::Cancel);
                     }
-                    ui.add_enabled(false, egui::Button::new("保存"))
-                        .on_disabled_hover_text("保存功能尚未接入");
-                    if ui.button("丢弃更改").clicked() {
-                        answer = Some(true);
+                    if ui
+                        .add_enabled(can_save, egui::Button::new("保存"))
+                        .clicked()
+                    {
+                        answer = Some(TransitionDecision::Save);
+                    }
+                    if ui
+                        .add_enabled(can_save, egui::Button::new("另存为…"))
+                        .clicked()
+                    {
+                        answer = Some(TransitionDecision::SaveAs);
+                    }
+                    if ui
+                        .add_enabled(!busy, egui::Button::new("丢弃更改"))
+                        .clicked()
+                    {
+                        answer = Some(TransitionDecision::Discard);
                     }
                 });
                 answer
             });
         modal
             .inner
-            .or_else(|| modal.should_close().then_some(false))
+            .or_else(|| modal.should_close().then_some(TransitionDecision::Cancel))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saving_keeps_the_original_intent_until_success_and_cancel_clears_it() {
+        let mut transition = DocumentTransition::default();
+        transition.request(DocumentAction::Exit, true);
+        transition.wait_for_save();
+        assert!(transition.save_finished(false).is_none());
+        assert!(transition.is_pending());
+        transition.wait_for_save();
+        assert_eq!(transition.save_finished(true), Some(DocumentAction::Exit));
+        assert!(!transition.is_pending());
+        assert!(transition.save_finished(true).is_none());
+        transition.request(DocumentAction::Close, true);
+        transition.wait_for_save();
+        transition.resolve(false);
+        assert!(transition.save_finished(true).is_none());
+    }
 
     #[test]
     fn clean_transitions_are_immediate() {

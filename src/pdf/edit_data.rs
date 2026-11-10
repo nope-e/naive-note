@@ -32,7 +32,7 @@ impl EditData {
         ciborium::into_writer(self, &mut cbor).context("Encode edit data as CBOR")?;
         ensure!(
             cbor.len() <= MAX_EDIT_BYTES,
-            "Edit data exceeds the 8 MiB probe limit"
+            "Edit data exceeds the 8 MiB limit"
         );
         zstd::stream::encode_all(cbor.as_slice(), 3).context("Compress edit data with Zstd")
     }
@@ -40,7 +40,7 @@ impl EditData {
     pub fn decode(bytes: &[u8]) -> Result<Self> {
         ensure!(
             bytes.len() <= MAX_EDIT_BYTES,
-            "Compressed edit data exceeds the 8 MiB probe limit"
+            "Compressed edit data exceeds the 8 MiB limit"
         );
         let mut decoder =
             zstd::stream::read::Decoder::new(bytes).context("Invalid Zstd edit data")?;
@@ -51,7 +51,7 @@ impl EditData {
             .read_to_end(&mut cbor)?;
         ensure!(
             cbor.len() <= MAX_EDIT_BYTES,
-            "Decoded edit data exceeds the 8 MiB probe limit"
+            "Decoded edit data exceeds the 8 MiB limit"
         );
         let mut cursor = Cursor::new(&cbor);
         let data: Self = ciborium::from_reader(&mut cursor).context("Invalid CBOR edit data")?;

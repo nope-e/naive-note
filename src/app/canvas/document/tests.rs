@@ -22,11 +22,12 @@ fn fixture_pdf() -> LoadedPdf {
             bounds: Rect::new(0.0, 0.0, 600.0, 800.0),
         }),
         edit_data_status: "Existing annotations in immutable base".to_owned(),
+        fingerprint: crate::storage::FileFingerprint::of(b"fixture"),
     }
 }
 
 fn add(document: &mut CanvasDocument) {
-    let stroke = crate::ink::demo_stroke(fixture_pdf().pages[0]).unwrap();
+    let stroke = crate::ink::test_support::pressure_stroke(fixture_pdf().pages[0]).unwrap();
     document.add_stroke(Arc::new(stroke));
 }
 
@@ -119,4 +120,81 @@ fn draft_can_close_and_readouts_follow_revision_including_saved_deletions() {
     assert!(!document.is_dirty());
     assert!(!document.subtitle().contains("未保存"));
     assert!(document.can_undo());
+}
+
+#[test]
+fn save_completion_marks_only_its_snapshot_and_keeps_the_original_history() {
+    use crate::pdf::{SaveResponse, SavedPdf};
+    let mut document = document();
+    add(&mut document);
+    let saved_revision = document.revision().current;
+    let original = Arc::clone(&document.edits.strokes(0)[0]);
+    document.pending_save = Some((100, saved_revision));
+    assert!(!document.can_save());
+    assert!(document.can_ink() && document.can_undo());
+    add(&mut document);
+    document.saved(SaveResponse {
+        document: None,
+        request: 100,
+        revision: saved_revision,
+        result: Ok(SavedPdf {
+            path: "saved.pdf".into(),
+            fingerprint: crate::storage::FileFingerprint::of(b"saved"),
+        }),
+    });
+    assert_eq!(document.revision().saved, saved_revision);
+    assert!(document.is_dirty());
+    assert_eq!(document.title(), "saved.pdf");
+    assert!(Arc::ptr_eq(&original, &document.edits.strokes(0)[0]));
+    document.undo();
+    assert!(!document.is_dirty());
+    document.undo();
+    assert!(document.is_dirty());
+    document.redo();
+    assert!(!document.is_dirty());
+}
+
+#[test]
+fn failed_and_stale_saves_keep_dirty_edits_redo_and_the_previous_target() {
+    use crate::pdf::{SaveResponse, SavedPdf};
+    let mut document = document();
+    add(&mut document);
+    add(&mut document);
+    document.undo();
+    let revision = document.revision();
+    document.pending_save = Some((100, revision.current));
+    document.saved(SaveResponse {
+        document: None,
+        request: 99,
+        revision: revision.current,
+        result: Ok(SavedPdf {
+            path: "stale.pdf".into(),
+            fingerprint: crate::storage::FileFingerprint::of(b"stale"),
+        }),
+    });
+    assert!(document.is_saving());
+    assert!(document.save_path().is_none());
+    document.saved(SaveResponse {
+        document: None,
+        request: 100,
+        revision: revision.current,
+        result: Err("disk full".into()),
+    });
+    assert_eq!(document.revision(), revision);
+    assert!(!document.is_saving());
+    assert!(document.is_dirty() && document.can_redo() && document.can_save());
+    assert!(document.save_path().is_none());
+    assert!(document.notice().unwrap().contains("disk full"));
+    document.close();
+    document.saved(SaveResponse {
+        document: None,
+        request: 100,
+        revision: revision.current,
+        result: Ok(SavedPdf {
+            path: "late.pdf".into(),
+            fingerprint: crate::storage::FileFingerprint::of(b"late"),
+        }),
+    });
+    assert!(!document.can_close());
+    assert!(document.save_path().is_none());
 }

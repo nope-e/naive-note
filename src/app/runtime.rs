@@ -113,6 +113,24 @@ impl Runtime {
             self.frame_rate.reset();
             self.request_repaint();
         }
+        if let Some(suggested) = self.canvas.take_save_request() {
+            self.cancel_input();
+            let mut dialog = rfd::FileDialog::new()
+                .set_title("另存为 PDF")
+                .add_filter("PDF document", &["pdf"])
+                .set_parent(&self.window.window)
+                .set_file_name(suggested.file_name().unwrap_or_default().to_string_lossy());
+            if let Some(parent) = suggested
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+            {
+                dialog = dialog.set_directory(parent);
+            }
+            self.canvas.save_dialog_result(dialog.save_file());
+            self.cancel_input();
+            self.frame_rate.reset();
+            self.request_repaint();
+        }
         Ok(())
     }
 

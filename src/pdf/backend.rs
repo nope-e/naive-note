@@ -17,7 +17,7 @@ use super::{
 const MAX_BITMAP_EDGE: u32 = 1024;
 const _: () = assert!(MAX_BITMAP_EDGE as usize * MAX_BITMAP_EDGE as usize * 4 <= PAGE_CACHE_BYTES);
 const PREVIEW_SCALE: f32 = 1.0;
-const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_FILE_BYTES: u64 = 1024 * 1024 * 1024;
 
 pub(super) struct PdfSession {
     base: Arc<[u8]>,
@@ -73,12 +73,8 @@ impl PdfSession {
         })
     }
 
-    pub fn export_probe(
-        &self,
-        stroke: &crate::document::StrokeRecord,
-        path: &Path,
-    ) -> Result<String> {
-        super::save::save_probe(&self.base, stroke, path)
+    pub fn base(&self) -> &[u8] {
+        &self.base
     }
 
     #[cfg(test)]
@@ -92,6 +88,7 @@ impl PdfSession {
             page_count: self.pages.len() as u32,
             pages: self.pages.clone(),
             edit_data_status: super::save::edit_data_status(&self.document),
+            fingerprint: crate::storage::FileFingerprint::of(&self.base),
             first_page: Arc::new(self.render_preview(0)?),
         })
     }

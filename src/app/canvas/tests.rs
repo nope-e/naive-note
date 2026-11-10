@@ -16,6 +16,7 @@ fn workspace() -> CanvasWorkspace {
         input: CanvasInput::for_editor(),
         toolbar: WorkspaceToolbar::default(),
         open_requested: false,
+        save_requested: None,
         exit_requested: false,
         transition: DocumentTransition::default(),
     }
@@ -23,9 +24,29 @@ fn workspace() -> CanvasWorkspace {
 
 fn add(workspace: &mut CanvasWorkspace) {
     let page = PageGeometry::new(Rect::new(0.0, 0.0, 600.0, 800.0), Rotation::R0, 1.0).unwrap();
-    workspace
-        .document
-        .add_stroke(Arc::new(crate::ink::demo_stroke(page).unwrap()));
+    workspace.document.add_stroke(Arc::new(
+        crate::ink::test_support::pressure_stroke(page).unwrap(),
+    ));
+}
+
+#[test]
+fn save_request_finishes_active_ink_once_and_dialog_cancel_preserves_it() {
+    let mut workspace = workspace();
+    let viewport = CanvasViewport::new(Rect::new(0.0, 0.0, 900.0, 700.0), 1.0, (900, 700)).unwrap();
+    workspace.view.update_viewport(viewport);
+    let position = viewport.logical.center();
+    workspace.mouse_button(true, Some(position), egui::Modifiers::NONE, false);
+    assert!(workspace.input.is_drawing());
+    workspace.request_save(false);
+    assert!(!workspace.input.is_drawing());
+    assert!(workspace.document.is_dirty() && workspace.document.can_undo());
+    assert!(workspace.take_save_request().is_some());
+    assert!(workspace.take_save_request().is_none());
+    workspace.save_dialog_result(None);
+    workspace.mouse_button(false, Some(position), egui::Modifiers::NONE, false);
+    workspace.document.undo();
+    assert!(!workspace.document.is_dirty());
+    assert!(!workspace.document.can_undo());
 }
 
 #[test]
@@ -100,4 +121,40 @@ fn pending_confirmation_cancels_active_ink_and_blocks_new_mouse_input() {
     assert!(workspace.document.can_undo());
     workspace.document.undo();
     assert!(!workspace.document.is_dirty());
+}
+
+#[test]
+fn exit_waits_for_saved_edits_including_changes_made_after_the_first_snapshot() {
+    use std::{fs, sync::mpsc, time::Duration};
+    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(".scratch")
+        .join(format!("workspace-save-test-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("saved.pdf");
+    let (send, received) = mpsc::channel();
+    let mut workspace = workspace();
+    workspace.document = CanvasDocument::with_worker(
+        PdfWorker::new(move |response| {
+            send.send(response).unwrap();
+        })
+        .unwrap(),
+    );
+    add(&mut workspace);
+    workspace.request_save(false);
+    workspace.take_save_request();
+    workspace.save_dialog_result(Some(path.clone()));
+    add(&mut workspace); // The worker already owns the preceding revision.
+    workspace.request_exit();
+    assert!(!workspace.take_exit_request());
+    workspace.pdf_response(received.recv_timeout(Duration::from_secs(5)).unwrap());
+    assert!(!workspace.take_exit_request());
+    assert!(workspace.transition.is_pending() && workspace.document.is_dirty());
+    workspace.transition.wait_for_save();
+    workspace.request_save(false);
+    workspace.pdf_response(received.recv_timeout(Duration::from_secs(5)).unwrap());
+    assert!(workspace.take_exit_request());
+    assert!(!workspace.document.is_dirty());
+    assert!(!workspace.transition.is_pending());
+    fs::remove_file(path).unwrap();
+    fs::remove_dir(directory).unwrap();
 }

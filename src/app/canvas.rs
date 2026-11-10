@@ -19,7 +19,7 @@ use area::CanvasArea;
 use document::CanvasDocument;
 use ink_input::CanvasInput;
 use toolbar::{ToolbarAction, WorkspaceToolbar};
-use transition::{DocumentAction, DocumentTransition};
+use transition::{DocumentAction, DocumentTransition, TransitionDecision};
 use view::CanvasView;
 use winit::event_loop::EventLoopProxy;
 
@@ -34,6 +34,7 @@ pub(super) struct CanvasWorkspace {
     input: CanvasInput,
     toolbar: WorkspaceToolbar,
     open_requested: bool,
+    save_requested: Option<PathBuf>,
     exit_requested: bool,
     transition: DocumentTransition,
 }
@@ -47,6 +48,7 @@ impl CanvasWorkspace {
             input: CanvasInput::for_editor(),
             toolbar: WorkspaceToolbar::default(),
             open_requested: false,
+            save_requested: None,
             exit_requested: false,
             transition: DocumentTransition::default(),
         })
@@ -66,11 +68,14 @@ impl CanvasWorkspace {
 
     fn request_transition(&mut self, action: DocumentAction) {
         self.input.cancel_drawing();
-        if let Some(action) = self
-            .transition
-            .request(action, self.document.needs_discard_confirmation())
-        {
+        if let Some(action) = self.transition.request(
+            action,
+            self.document.needs_discard_confirmation() || self.document.is_saving(),
+        ) {
             self.apply_transition(action);
+        }
+        if self.document.is_saving() {
+            self.transition.wait_for_save();
         }
     }
 
@@ -83,10 +88,55 @@ impl CanvasWorkspace {
     }
 
     pub fn pdf_response(&mut self, response: PdfResponse) {
+        let was_saving = self.document.is_saving();
+        let saved_ok = matches!(&response, PdfResponse::Saved(response) if response.result.is_ok());
         if let Some(page) = self.document.receive(response) {
             self.input.cancel_drawing();
             self.view = CanvasView::new(page);
             self.area = CanvasArea::default();
+        }
+        if was_saving
+            && !self.document.is_saving()
+            && let Some(action) = self
+                .transition
+                .save_finished(saved_ok && !self.document.is_dirty())
+        {
+            self.apply_transition(action);
+        }
+    }
+
+    fn request_save(&mut self, save_as: bool) {
+        if !self.document.can_save() {
+            return;
+        }
+        if let Some(stroke) = self.input.finish_for_save() {
+            self.document.add_stroke(stroke);
+        }
+        if !save_as && let Some(path) = self.document.save_path() {
+            let path = path.to_owned();
+            self.document.save(path, self.view.draft_page());
+            if !self.document.is_saving() {
+                self.transition.save_finished(false);
+            }
+        } else {
+            self.save_requested = Some(
+                self.document
+                    .save_path()
+                    .map_or_else(|| PathBuf::from("未命名.pdf"), PathBuf::from),
+            );
+        }
+    }
+
+    pub fn take_save_request(&mut self) -> Option<PathBuf> {
+        self.save_requested.take()
+    }
+
+    pub fn save_dialog_result(&mut self, path: Option<PathBuf>) {
+        if let Some(path) = path {
+            self.document.save(path, self.view.draft_page());
+        }
+        if !self.document.is_saving() {
+            self.transition.save_finished(false);
         }
     }
 
@@ -179,10 +229,9 @@ impl CanvasWorkspace {
                 style: &self.input.style,
                 document: toolbar::DocumentActions {
                     can_close: self.document.can_close(),
+                    can_save: self.document.can_save(),
                     can_undo: self.document.can_undo(),
                     can_redo: self.document.can_redo(),
-                    can_demo: self.document.can_demo(),
-                    can_export_demo: self.document.can_export_demo(),
                     current_page: self.view.current_page(),
                     page_count: self.view.page_count(),
                     tool: self.input.tool,
@@ -201,6 +250,8 @@ impl CanvasWorkspace {
                     action,
                     Some(
                         ToolbarAction::Smoothing
+                            | ToolbarAction::Save
+                            | ToolbarAction::SaveAs
                             | ToolbarAction::Color(_)
                             | ToolbarAction::Width(_)
                             | ToolbarAction::PressureGamma(_)
@@ -211,6 +262,14 @@ impl CanvasWorkspace {
                 self.input.cancel_drawing();
             }
             match action {
+                Some(ToolbarAction::Save) => {
+                    self.request_save(false);
+                    action = None;
+                }
+                Some(ToolbarAction::SaveAs) => {
+                    self.request_save(true);
+                    action = None;
+                }
                 Some(ToolbarAction::Open) => {
                     self.open_requested = true;
                     action = None;
@@ -225,14 +284,6 @@ impl CanvasWorkspace {
                 }
                 Some(ToolbarAction::Redo) => {
                     self.document.redo();
-                    action = None;
-                }
-                Some(ToolbarAction::DemoStroke) => {
-                    self.document.toggle_demo();
-                    action = None;
-                }
-                Some(ToolbarAction::ExportDemo) => {
-                    self.document.export_demo();
                     action = None;
                 }
                 Some(ToolbarAction::Tool(tool)) => {
@@ -319,12 +370,28 @@ impl CanvasWorkspace {
 
         // Render the modal last so it blocks all other UI. Apply a decision only
         // on the input pass: egui can repeat layout within the same frame.
-        if let Some(discard) = self.transition.show(ui.ctx(), &title)
-            && process_input
+        if let Some(decision) = self.transition.show(
+            ui.ctx(),
+            &title,
+            self.document.is_saving(),
+            self.document.can_save(),
+            self.document.notice(),
+        ) && process_input
         {
-            self.input.cancel_drawing();
-            if let Some(action) = self.transition.resolve(discard) {
-                self.apply_transition(action);
+            match decision {
+                TransitionDecision::Cancel => {
+                    self.transition.resolve(false);
+                }
+                TransitionDecision::Discard => {
+                    self.input.cancel_drawing();
+                    if let Some(action) = self.transition.resolve(true) {
+                        self.apply_transition(action);
+                    }
+                }
+                TransitionDecision::Save | TransitionDecision::SaveAs => {
+                    self.transition.wait_for_save();
+                    self.request_save(matches!(decision, TransitionDecision::SaveAs));
+                }
             }
             ui.ctx().request_repaint();
         }

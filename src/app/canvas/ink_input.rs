@@ -96,6 +96,12 @@ impl CanvasInput {
         self.last_position = None;
     }
 
+    pub fn finish_for_save(&mut self) -> Option<Arc<StrokeRecord>> {
+        let stroke = self.finish_stroke();
+        self.cancel_drawing();
+        stroke
+    }
+
     /// UI drags must retain ownership until Up, even when they change the view.
     pub fn cancel_drawing(&mut self) {
         self.active = None;

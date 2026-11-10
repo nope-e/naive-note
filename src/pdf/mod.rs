@@ -3,14 +3,16 @@
 mod backend;
 mod cache;
 mod edit_data;
-pub mod probe;
 mod save;
 mod tiles;
 mod worker;
 
 use std::{path::PathBuf, sync::Arc};
 
-use crate::document::{PageGeometry, Rect};
+use crate::{
+    document::{PageGeometry, Rect, StrokeRecord},
+    storage::FileFingerprint,
+};
 
 pub use cache::ByteLru;
 pub use tiles::{PageTile, TileKey, visible_tiles};
@@ -36,6 +38,30 @@ pub struct LoadedPdf {
     pub pages: Vec<PageGeometry>,
     pub first_page: Arc<PageBitmap>,
     pub edit_data_status: String,
+    pub fingerprint: FileFingerprint,
+}
+
+pub struct SaveSnapshot {
+    pub document: Option<u64>,
+    pub revision: u64,
+    pub strokes: Vec<Arc<StrokeRecord>>,
+    pub draft_page: PageGeometry,
+    pub document_id: uuid::Uuid,
+    pub path: PathBuf,
+    /// Most recent successful save, or the file bytes at open time.
+    pub tracked_target: Option<(PathBuf, FileFingerprint)>,
+}
+
+pub struct SavedPdf {
+    pub path: PathBuf,
+    pub fingerprint: FileFingerprint,
+}
+
+pub struct SaveResponse {
+    pub document: Option<u64>,
+    pub request: u64,
+    pub revision: u64,
+    pub result: Result<SavedPdf, String>,
 }
 
 pub struct OpenResponse {
@@ -52,14 +78,8 @@ pub struct TileResponse {
     pub result: Result<Vec<Arc<PageTile>>, String>,
 }
 
-pub struct ExportResponse {
-    pub document: u64,
-    pub request: u64,
-    pub result: Result<std::path::PathBuf, String>,
-}
-
 pub enum PdfResponse {
     Opened(OpenResponse),
     Tiles(TileResponse),
-    Exported(ExportResponse),
+    Saved(SaveResponse),
 }

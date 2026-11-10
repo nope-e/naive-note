@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::ink::demo_stroke;
+use crate::ink::test_support::pressure_stroke;
 
 struct TestDirectory(PathBuf);
 
@@ -110,14 +110,135 @@ fn fixture(rotation: i32) -> Vec<u8> {
 
 fn stroke_for(bytes: &[u8]) -> StrokeRecord {
     let document = PdfDocument::from_bytes(bytes).unwrap();
-    demo_stroke(page_geometry(&document.load_pdf_page(0).unwrap()).unwrap()).unwrap()
+    pressure_stroke(page_geometry(&document.load_pdf_page(0).unwrap()).unwrap()).unwrap()
+}
+
+fn save_stroke(base: &[u8], stroke: &StrokeRecord, output: &Path) -> Result<()> {
+    let (bytes, data) = serialize(base, &[std::sync::Arc::new(stroke.clone())], Uuid::new_v4())?;
+    crate::storage::save_atomic(output, None, &bytes, |path| {
+        verify_data(&read_pdf(path)?, &data)
+    })?;
+    Ok(())
 }
 
 fn saved_fixture(directory: &TestDirectory) -> Vec<u8> {
     let base = fixture(0);
     let output = directory.file("pressure.pdf");
-    save_probe(&base, &stroke_for(&base), &output).unwrap();
+    save_stroke(&base, &stroke_for(&base), &output).unwrap();
     fs::read(output).unwrap()
+}
+
+#[test]
+fn session_snapshots_save_multiple_pages_repeat_without_duplicates_and_remove_undone_ink() {
+    use std::sync::Arc;
+    let base = fixture(270);
+    let original = PdfDocument::from_bytes(&base).unwrap();
+    let first = Arc::new(stroke_for(&base));
+    let third = Arc::new(stroke_for(&base));
+    let mut second =
+        pressure_stroke(page_geometry(&original.load_pdf_page(1).unwrap()).unwrap()).unwrap();
+    second.page_index = 1;
+    let second = Arc::new(second);
+    let document_id = Uuid::new_v4();
+    for _ in 0..2 {
+        let (bytes, data) = serialize(
+            &base,
+            &[first.clone(), third.clone(), second.clone()],
+            document_id,
+        )
+        .unwrap();
+        assert_eq!(data.document_id, document_id);
+        assert_eq!(data.strokes.len(), 3);
+        let reopened = PdfDocument::from_bytes(&bytes).unwrap();
+        for index in 0..2 {
+            assert_eq!(
+                reopened.load_pdf_page(index).unwrap().annotations().count(),
+                original.load_pdf_page(index).unwrap().annotations().count()
+                    + if index == 0 { 2 } else { 1 }
+            );
+        }
+        assert_eq!(
+            reopened
+                .load_embedded_file("existing.txt")
+                .unwrap()
+                .unwrap(),
+            b"keep this attachment"
+        );
+    }
+    let (bytes, data) = serialize(&base, &[second], document_id).unwrap();
+    assert_eq!(data.strokes.len(), 1);
+    let reopened = PdfDocument::from_bytes(&bytes).unwrap();
+    assert_eq!(
+        reopened.load_pdf_page(0).unwrap().annotations().count(),
+        original.load_pdf_page(0).unwrap().annotations().count()
+    );
+    // A normal reopen establishes a new immutable base, retaining old metadata.
+    let (_, extended) = serialize(&bytes, &[first], Uuid::new_v4()).unwrap();
+    assert_eq!(extended.document_id, document_id);
+    assert_eq!(extended.strokes.len(), 2);
+    let (_, empty) = serialize(&base, &[], document_id).unwrap();
+    assert!(empty.strokes.is_empty());
+}
+
+#[test]
+fn ignored_private_metadata_can_be_replaced_without_removing_standard_ink() {
+    let directory = TestDirectory::new();
+    let bytes = saved_fixture(&directory);
+    let mut document = PdfDocument::from_bytes(&bytes).unwrap();
+    let filename = read_edit_data(&document).unwrap().unwrap().filename();
+    document
+        .add_embedded_file(
+            &filename,
+            b"invalid metadata",
+            EmbeddedFileOptions::new(&filename),
+        )
+        .unwrap();
+    let mut corrupt = Vec::new();
+    document.write_to(&mut corrupt).unwrap();
+    let fresh = std::sync::Arc::new(stroke_for(&corrupt));
+    let (bytes, data) = serialize(&corrupt, &[fresh], Uuid::new_v4()).unwrap();
+    assert_eq!(data.strokes.len(), 1);
+    let reopened = PdfDocument::from_bytes(&bytes).unwrap();
+    assert_eq!(
+        reopened.load_pdf_page(0).unwrap().annotations().count(),
+        document.load_pdf_page(0).unwrap().annotations().count() + 1
+    );
+    assert_eq!(
+        attachment_names(&reopened)
+            .unwrap()
+            .iter()
+            .filter(|name| name.starts_with("naive-note."))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn draft_serializes_its_original_paper_geometry_and_squared_background() {
+    let geometry = PageGeometry::new(
+        crate::document::Rect::new(20., 30., 615., 872.),
+        crate::document::Rotation::R0,
+        1.,
+    )
+    .unwrap();
+    let base = draft_pdf(geometry).unwrap();
+    let document = PdfDocument::from_bytes(&base).unwrap();
+    let page = document.load_pdf_page(0).unwrap();
+    assert_eq!(page_geometry(&page).unwrap(), geometry);
+    assert!(
+        !required(&page.object(), "Contents")
+            .unwrap()
+            .read_stream()
+            .unwrap()
+            .is_empty()
+    );
+    let (_, data) = serialize(
+        &base,
+        &[std::sync::Arc::new(pressure_stroke(geometry).unwrap())],
+        Uuid::new_v4(),
+    )
+    .unwrap();
+    assert_eq!(data.strokes.len(), 1);
 }
 
 #[test]
@@ -128,7 +249,7 @@ fn pressure_ink_attachment_round_trips_with_rotated_cropped_scaled_pages_and_exi
         let before = PdfDocument::from_bytes(&base).unwrap();
         let stroke = stroke_for(&base);
         let output = directory.file(&format!("中文 压感 {rotation}.pdf"));
-        save_probe(&base, &stroke, &output).unwrap();
+        save_stroke(&base, &stroke, &output).unwrap();
         let document = PdfDocument::from_bytes(&fs::read(output).unwrap()).unwrap();
         let data = read_edit_data(&document).unwrap().unwrap();
         assert_eq!(data.strokes.len(), 1);
@@ -189,18 +310,18 @@ fn pressure_ink_attachment_round_trips_with_rotated_cropped_scaled_pages_and_exi
 }
 
 #[test]
-fn same_snapshot_exports_are_stable_and_source_or_existing_output_is_never_overwritten() {
+fn same_snapshot_saves_are_stable_and_existing_paths_require_a_known_fingerprint() {
     let directory = TestDirectory::new();
     let base = fixture(90);
     let stroke = stroke_for(&base);
     let source = directory.file("source.pdf");
     fs::write(&source, &base).unwrap();
-    assert!(save_probe(&base, &stroke, &source).is_err());
+    assert!(save_stroke(&base, &stroke, &source).is_err());
     assert_eq!(fs::read(&source).unwrap(), base);
     for name in ["first.pdf", "second.pdf"] {
         let path = directory.file(name);
-        save_probe(&base, &stroke, &path).unwrap();
-        assert!(save_probe(&base, &stroke, &path).is_err());
+        save_stroke(&base, &stroke, &path).unwrap();
+        assert!(save_stroke(&base, &stroke, &path).is_err());
         let document = PdfDocument::from_bytes(&fs::read(path).unwrap()).unwrap();
         assert_eq!(
             read_edit_data(&document).unwrap().unwrap().strokes[0]
@@ -210,19 +331,19 @@ fn same_snapshot_exports_are_stable_and_source_or_existing_output_is_never_overw
         );
         assert_eq!(document.load_pdf_page(0).unwrap().annotations().count(), 2);
     }
-    // No source handle is retained by an export.
+    // Saving retains no source file handle.
     fs::rename(&source, directory.file("renamed.pdf")).unwrap();
 }
 
 #[test]
-fn new_export_extends_existing_valid_edit_data_without_losing_the_document_uuid() {
+fn reopened_save_extends_existing_valid_edit_data_without_losing_the_document_uuid() {
     let directory = TestDirectory::new();
     let first = saved_fixture(&directory);
     let previous = read_edit_data(&PdfDocument::from_bytes(&first).unwrap())
         .unwrap()
         .unwrap();
     let output = directory.file("second.pdf");
-    save_probe(&first, &stroke_for(&first), &output).unwrap();
+    save_stroke(&first, &stroke_for(&first), &output).unwrap();
     let document = PdfDocument::from_bytes(&fs::read(output).unwrap()).unwrap();
     let data = read_edit_data(&document).unwrap().unwrap();
     assert_eq!(data.document_id, previous.document_id);
@@ -230,7 +351,7 @@ fn new_export_extends_existing_valid_edit_data_without_losing_the_document_uuid(
     assert_eq!(data.strokes[0], previous.strokes[0]);
     assert_eq!(document.embedded_files().unwrap().len(), 2);
     assert!(
-        save_probe(
+        save_stroke(
             &first,
             &previous.strokes[0].stroke,
             &directory.file("duplicate.pdf")
@@ -332,7 +453,7 @@ fn embedded_name_tree_kids_are_preserved_and_flat_names_are_sorted() {
     let mut bytes = Vec::new();
     document.write_to(&mut bytes).unwrap();
     let output = directory.file("kids.pdf");
-    save_probe(&bytes, &stroke_for(&bytes), &output).unwrap();
+    save_stroke(&bytes, &stroke_for(&bytes), &output).unwrap();
     let saved = PdfDocument::from_bytes(&fs::read(output).unwrap()).unwrap();
     assert_eq!(
         saved.load_embedded_file("existing.txt").unwrap().unwrap(),
@@ -361,7 +482,7 @@ fn signed_encrypted_and_invalid_records_are_rejected_before_creating_output() {
     document.write_to(&mut bytes).unwrap();
     let output = directory.file("rejected.pdf");
     assert!(
-        save_probe(&bytes, &stroke_for(&base), &output)
+        save_stroke(&bytes, &stroke_for(&base), &output)
             .unwrap_err()
             .to_string()
             .contains("Signed PDF")
@@ -377,11 +498,11 @@ fn signed_encrypted_and_invalid_records_are_rejected_before_creating_output() {
         .unwrap()
         .write_to_with_options(&mut encrypted, options)
         .unwrap();
-    assert!(save_probe(&encrypted, &stroke_for(&base), &output).is_err());
+    assert!(save_stroke(&encrypted, &stroke_for(&base), &output).is_err());
     assert!(!output.exists());
     let mut stroke = stroke_for(&base);
     stroke.modeled_samples[0].pressure = f64::NAN;
-    assert!(save_probe(&base, &stroke, &output).is_err());
+    assert!(save_stroke(&base, &stroke, &output).is_err());
     assert!(!output.exists());
 }
 

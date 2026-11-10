@@ -6,11 +6,9 @@ mod ink;
 mod pdf;
 mod platform;
 mod render;
+mod storage;
 
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    if pdf::probe::run_cli()? {
-        return Ok(());
-    }
     app::run()
 }

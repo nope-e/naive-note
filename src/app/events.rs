@@ -125,7 +125,7 @@ impl ApplicationHandler<UserEvent> for Application {
         }
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Repaint(at) => {
                 if let Some(runtime) = self.runtime.as_mut() {
@@ -136,6 +136,10 @@ impl ApplicationHandler<UserEvent> for Application {
                 if let Some(runtime) = self.runtime.as_mut() {
                     runtime.drain_pen();
                     runtime.canvas.pdf_response(*response);
+                    if runtime.canvas.take_exit_request() {
+                        event_loop.exit();
+                        return;
+                    }
                     runtime.request_repaint();
                 }
             }

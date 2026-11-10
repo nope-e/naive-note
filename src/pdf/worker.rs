@@ -11,9 +11,9 @@ use std::{
 use anyhow::{Context, Result};
 
 use super::{
-    ExportResponse, OpenResponse, PdfResponse, TileKey, TileResponse, backend::PdfSession,
+    OpenResponse, PdfResponse, SaveResponse, SaveSnapshot, SavedPdf, TileKey, TileResponse,
+    backend::PdfSession,
 };
-use crate::document::StrokeRecord;
 
 enum Command {
     Open {
@@ -27,11 +27,9 @@ enum Command {
         keys: Vec<TileKey>,
     },
     Close,
-    ExportProbe {
-        document: u64,
+    Save {
         request: u64,
-        lifecycle: u64,
-        stroke: Arc<StrokeRecord>,
+        snapshot: SaveSnapshot,
     },
     Shutdown,
 }
@@ -141,39 +139,21 @@ impl PdfWorker {
                                 }
                             }
                         }
-                        Command::ExportProbe {
-                            document,
-                            request,
-                            lifecycle,
-                            stroke,
-                        } => {
-                            if lifecycle != worker_latest.load(Ordering::Acquire) {
-                                continue;
-                            }
-                            let Some((id, opened)) = session.as_ref() else {
-                                continue;
-                            };
-                            if *id != document {
-                                continue;
-                            }
-                            let result = super::probe::output_directory()
-                                .and_then(|directory| {
-                                    let path = directory.join("pressure.pdf");
-                                    opened.export_probe(&stroke, &path)?;
-                                    Ok(path)
-                                })
-                                .map_err(|error| {
-                                    log::warn!("PDF save probe failed: {error:#}");
-                                    format!("{error:#}")
-                                });
-                            deliver(PdfResponse::Exported(ExportResponse {
-                                document,
-                                request,
-                                result,
-                            }));
-                        }
                         Command::Close => {
                             session.take();
+                        }
+                        Command::Save { request, snapshot } => {
+                            let result =
+                                save_snapshot(&snapshot, session.as_ref()).map_err(|error| {
+                                    log::warn!("PDF save failed: {error:#}");
+                                    format!("{error:#}")
+                                });
+                            deliver(PdfResponse::Saved(SaveResponse {
+                                document: snapshot.document,
+                                request,
+                                revision: snapshot.revision,
+                                result,
+                            }));
                         }
                         Command::Shutdown => break,
                     }
@@ -229,15 +209,10 @@ impl PdfWorker {
         request
     }
 
-    pub fn export_probe(&self, document: u64, stroke: Arc<StrokeRecord>) -> Result<u64> {
+    pub fn save(&self, snapshot: SaveSnapshot) -> Result<u64> {
         let request = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed) + 1;
         self.sender
-            .send(Command::ExportProbe {
-                document,
-                request,
-                lifecycle: self.latest.load(Ordering::Acquire),
-                stroke,
-            })
+            .send(Command::Save { request, snapshot })
             .context("MuPDF worker stopped")?;
         Ok(request)
     }
@@ -247,6 +222,40 @@ impl PdfWorker {
         self.latest.store(request, Ordering::Release);
         request
     }
+}
+
+fn save_snapshot(snapshot: &SaveSnapshot, session: Option<&(u64, PdfSession)>) -> Result<SavedPdf> {
+    use crate::storage;
+    // Save As observes an existing destination before serialization. A save to
+    // the current path must still match the bytes last opened/saved by us.
+    let expected = match &snapshot.tracked_target {
+        Some((path, fingerprint)) if storage::same_file_path(path, &snapshot.path) => {
+            Some(*fingerprint)
+        }
+        _ => storage::fingerprint(&snapshot.path)?,
+    };
+    let draft;
+    let base = if let Some(document) = snapshot.document {
+        let (id, opened) = session.context("PDF session was closed before saving")?;
+        anyhow::ensure!(*id == document, "PDF session changed before saving");
+        opened.base()
+    } else {
+        draft = super::save::draft_pdf(snapshot.draft_page)?;
+        &draft
+    };
+    let (bytes, data) = super::save::serialize(base, &snapshot.strokes, snapshot.document_id)?;
+    let fingerprint = storage::save_atomic(&snapshot.path, expected, &bytes, |path| {
+        let disk = super::save::read_pdf(path)?;
+        anyhow::ensure!(
+            disk == bytes,
+            "On-disk PDF differs from serialized snapshot"
+        );
+        super::save::verify_data(&disk, &data)
+    })?;
+    Ok(SavedPdf {
+        path: snapshot.path.clone(),
+        fingerprint,
+    })
 }
 
 impl Drop for PdfWorker {
@@ -263,47 +272,4 @@ impl Drop for PdfWorker {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    #[test]
-    fn queued_opens_are_superseded_and_close_invalidates_pending_work() {
-        let (responses, received) = mpsc::channel();
-        let (release, wait) = mpsc::channel();
-        let worker = PdfWorker::new(move |response| {
-            if let PdfResponse::Opened(response) = response {
-                let _ = responses.send(response);
-            }
-            // Hold the worker at a known boundary while the test queues actions.
-            let _ = wait.recv_timeout(Duration::from_secs(5));
-        })
-        .unwrap();
-        let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join(".scratch/no-such-pdf-for-worker-test.pdf");
-        let first = worker.open(missing.clone()).unwrap();
-        let response = received.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(response.request, first);
-        assert!(response.result.is_err());
-        let superseded = worker.open(missing.clone()).unwrap();
-        let newest = worker.open(missing.clone()).unwrap();
-        assert_ne!(superseded, newest);
-        release.send(()).unwrap();
-        let response = received.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(response.request, newest);
-
-        // Both commands are queued while the callback above still owns the worker.
-        worker.open(missing.clone()).unwrap();
-        worker.close();
-        release.send(()).unwrap();
-        assert!(matches!(
-            received.recv_timeout(Duration::from_millis(100)),
-            Err(mpsc::RecvTimeoutError::Timeout)
-        ));
-        let reopened = worker.open(missing).unwrap();
-        let response = received.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(response.request, reopened);
-        release.send(()).unwrap();
-        drop(worker);
-    }
-}
+mod tests;

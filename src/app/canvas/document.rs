@@ -1,6 +1,6 @@
 //! PDF lifecycle, worker responses and preview state for the current workspace.
 
-mod probe;
+mod saving;
 #[cfg(test)]
 mod tests;
 
@@ -21,7 +21,6 @@ use super::pdf_preview::PdfPreview;
 struct OpenDocument {
     pdf: LoadedPdf,
     preview: PdfPreview,
-    demo_stroke: Option<Arc<StrokeRecord>>,
 }
 
 pub(super) struct CanvasDocument {
@@ -30,9 +29,11 @@ pub(super) struct CanvasDocument {
     pending: Option<u64>,
     message: Option<String>,
     notice: Option<String>,
-    pending_export: Option<(u64, u64)>,
     loaded_request: Option<u64>,
     edits: EditHistory,
+    pending_save: Option<(u64, u64)>,
+    saved_target: Option<(PathBuf, crate::storage::FileFingerprint)>,
+    document_id: uuid::Uuid,
 }
 
 impl CanvasDocument {
@@ -50,15 +51,16 @@ impl CanvasDocument {
             pending: None,
             message: None,
             notice: None,
-            pending_export: None,
             loaded_request: None,
             edits: EditHistory::default(),
+            pending_save: None,
+            saved_target: None,
+            document_id: uuid::Uuid::new_v4(),
         }
     }
 
     pub fn open(&mut self, path: PathBuf) {
         self.notice = None;
-        self.pending_export = None;
         if let Some(loaded) = self.loaded.as_mut() {
             loaded.preview.cancel(&self.worker);
         }
@@ -77,25 +79,16 @@ impl CanvasDocument {
     /// Returns page geometry only when a successful open replaces the document.
     pub fn receive(&mut self, response: PdfResponse) -> Option<Vec<PageGeometry>> {
         match response {
+            PdfResponse::Saved(response) => {
+                self.saved(response);
+                None
+            }
             PdfResponse::Opened(response) => self.opened(response),
             PdfResponse::Tiles(response) => {
                 if let Some(loaded) = self.loaded.as_mut()
                     && let Err(error) = loaded.preview.receive(response)
                 {
                     self.set_error(format!("高清渲染失败：{error}"));
-                }
-                None
-            }
-            PdfResponse::Exported(response) => {
-                if self.pending_export != Some((response.document, response.request))
-                    || self.loaded_request != Some(response.document)
-                {
-                    return None;
-                }
-                self.pending_export = None;
-                match response.result {
-                    Ok(path) => self.open(path),
-                    Err(error) => self.set_error(format!("测试导出失败：{error}")),
                 }
                 None
             }
@@ -110,6 +103,9 @@ impl CanvasDocument {
         match response.result {
             Ok(pdf) => {
                 self.edits = EditHistory::default();
+                self.pending_save = None;
+                self.saved_target = Some((pdf.path.clone(), pdf.fingerprint));
+                self.document_id = uuid::Uuid::new_v4();
                 let pages = pdf.pages.clone();
                 self.message = Some(format!(
                     "{} | {} | Continuous reading",
@@ -117,11 +113,7 @@ impl CanvasDocument {
                     pdf.edit_data_status,
                 ));
                 let preview = PdfPreview::new(response.request, Arc::clone(&pdf.first_page));
-                self.loaded = Some(OpenDocument {
-                    pdf,
-                    preview,
-                    demo_stroke: None,
-                });
+                self.loaded = Some(OpenDocument { pdf, preview });
                 self.loaded_request = Some(response.request);
                 Some(pages)
             }
@@ -138,13 +130,15 @@ impl CanvasDocument {
         self.loaded = None;
         self.message = None;
         self.notice = None;
-        self.pending_export = None;
         self.loaded_request = None;
         self.edits = EditHistory::default();
+        self.pending_save = None;
+        self.saved_target = None;
+        self.document_id = uuid::Uuid::new_v4();
     }
 
     pub fn can_ink(&self) -> bool {
-        self.pending.is_none() && self.pending_export.is_none()
+        self.pending.is_none()
     }
 
     pub fn add_stroke(&mut self, stroke: Arc<StrokeRecord>) {
@@ -208,6 +202,7 @@ impl CanvasDocument {
 
     pub fn can_close(&self) -> bool {
         self.loaded.is_some()
+            || self.saved_target.is_some()
             || self.pending.is_some()
             || self.edits.can_undo()
             || self.edits.can_redo()
@@ -219,7 +214,7 @@ impl CanvasDocument {
 
     pub fn label(&self, page: u32) -> String {
         let label = self.loaded.as_ref().map_or_else(
-            || "Test page 1 / 1".to_owned(),
+            || "Draft page 1 / 1".to_owned(),
             |loaded| format!("PDF page {} / {}", page + 1, loaded.pdf.page_count),
         );
         let revision = self.revision();
@@ -254,6 +249,13 @@ impl CanvasDocument {
     }
 
     pub fn title(&self) -> String {
+        if let Some((path, _)) = &self.saved_target {
+            return path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+        }
         self.loaded.as_ref().map_or_else(
             || "新建文档".to_owned(),
             |loaded| {
@@ -269,16 +271,16 @@ impl CanvasDocument {
     }
 
     pub fn subtitle(&self) -> String {
+        if self.is_saving() {
+            return "正在保存 PDF…".to_owned();
+        }
         if self.pending.is_some() {
             return "正在打开 PDF…".to_owned();
-        }
-        if self.pending_export.is_some() {
-            return "正在导出测试 PDF…".to_owned();
         }
         let count = self.stroke_count();
         if self.is_dirty() {
             format!("未保存更改 · 会话笔迹 {count} 笔")
-        } else if self.is_loaded() {
+        } else if self.is_loaded() || self.saved_target.is_some() {
             "PDF 文档".to_owned()
         } else {
             "草稿".to_owned()
@@ -295,9 +297,6 @@ impl CanvasDocument {
             page.strokes = self.edits.strokes(page.index).to_vec();
         }
         if let Some(loaded) = self.loaded.as_mut() {
-            if let Some(first) = scene.pages.iter_mut().find(|page| page.index == 0) {
-                first.demo_stroke = loaded.demo_stroke.clone();
-            }
             loaded.preview.update(
                 context,
                 &self.worker,

@@ -57,6 +57,10 @@ impl EditHistory {
         self.stroke_ids.len()
     }
 
+    pub fn snapshot(&self) -> Vec<Arc<StrokeRecord>> {
+        self.strokes.values().flatten().cloned().collect()
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
@@ -131,7 +135,6 @@ impl EditHistory {
     /// Step 8 calls this only after the snapshot's save transaction succeeds.
     /// Do not clear history or substitute the current revision: edits may have
     /// continued since the saved snapshot was captured.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn mark_saved(&mut self, revision: u64) {
         self.revision.saved = revision;
     }

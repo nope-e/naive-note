@@ -1,12 +1,6 @@
-//! Stage 3: full-copy test exports only. No replacement of the source PDF.
+//! Standard Ink annotations, pressure appearances and verified full-copy serialization.
 
-use std::{
-    collections::HashSet,
-    fmt::Write as _,
-    fs::{self, OpenOptions},
-    io::Read,
-    path::Path,
-};
+use std::{collections::HashSet, fmt::Write as _, fs, io::Read, path::Path};
 
 use anyhow::{Context, Result, ensure};
 use mupdf::{
@@ -37,8 +31,7 @@ pub(super) fn read_pdf(path: &Path) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-pub(super) fn save_probe(base: &[u8], stroke: &StrokeRecord, output: &Path) -> Result<String> {
-    let mut document = PdfDocument::from_bytes(base)?;
+fn ensure_writable(document: &PdfDocument) -> Result<()> {
     ensure!(
         !document.needs_password()?,
         "Password-protected PDF is read-only"
@@ -71,22 +64,12 @@ pub(super) fn save_probe(base: &[u8], stroke: &StrokeRecord, output: &Path) -> R
             );
         }
     }
-    ensure!(
-        stroke.page_index == 0,
-        "The save probe currently targets the first page"
-    );
-    let mut page = document.load_pdf_page(0)?;
+    Ok(())
+}
+
+fn add_stroke(document: &mut PdfDocument, stroke: &StrokeRecord) -> Result<SavedStroke> {
+    let mut page = document.load_pdf_page(i32::try_from(stroke.page_index)?)?;
     let geometry = page_geometry(&page)?;
-    let original_annotations = page.annotations().count();
-    let mut data = read_edit_data(&document)?.unwrap_or(EditData {
-        format_version: FORMAT_VERSION,
-        document_id: Uuid::new_v4(),
-        strokes: Vec::new(),
-    });
-    ensure!(
-        !data.strokes.iter().any(|s| s.stroke.id == stroke.id),
-        "Duplicate stroke UUID"
-    );
     validate_stroke(stroke, geometry)?;
     let centerline: Vec<_> = stroke
         .modeled_samples
@@ -106,19 +89,19 @@ pub(super) fn save_probe(base: &[u8], stroke: &StrokeRecord, output: &Path) -> R
     object.dict_put("NM", PdfObject::new_string(&stroke.id.to_string())?)?;
     object.dict_put(
         "Contents",
-        PdfObject::new_string("Naive Note simulated pressure stroke")?,
+        PdfObject::new_string("Naive Note pressure stroke")?,
     )?;
     // First clear MuPDF's pending appearance regeneration, then install the
     // final custom Form XObject. No semantic setter may run after this point.
     annotation.update()?;
     let (rect, contents) = appearance(stroke, geometry)?;
-    object.dict_put("Rect", numbers(&document, &rect)?)?;
+    object.dict_put("Rect", numbers(document, &rect)?)?;
     let mut form = document.new_dict()?;
     form.dict_put("Type", PdfObject::new_name("XObject")?)?;
     form.dict_put("Subtype", PdfObject::new_name("Form")?)?;
     form.dict_put("FormType", PdfObject::new_int(1)?)?;
-    form.dict_put("BBox", numbers(&document, &rect)?)?;
-    form.dict_put("Matrix", numbers(&document, &[1., 0., 0., 1., 0., 0.])?)?;
+    form.dict_put("BBox", numbers(document, &rect)?)?;
+    form.dict_put("Matrix", numbers(document, &[1., 0., 0., 1., 0., 0.])?)?;
     form.dict_put("Resources", document.new_dict()?)?;
     let stream = document.add_stream(
         &Buffer::from_bytes(contents.as_bytes())?,
@@ -134,18 +117,59 @@ pub(super) fn save_probe(base: &[u8], stroke: &StrokeRecord, output: &Path) -> R
         normal_appearance(&object)?.read_stream()? == contents.as_bytes(),
         "MuPDF replaced the pressure appearance during page update"
     );
-    data.strokes.push(SavedStroke {
+    Ok(SavedStroke {
         stroke: stroke.clone(),
         annotation_sha256: fingerprint(&object)?,
-    });
-    let payload = data.encode()?;
-    let filename = data.filename();
-    // The binding's embedded-file helpers only handle a flat name tree. Flatten
-    // it through MuPDF first so existing /Kids entries and other attachments survive.
+    })
+}
+
+/// Serialize only the current session strokes over the original immutable PDF.
+/// Invalid private metadata is replaced; all actual PDF annotations are retained.
+pub(super) fn serialize(
+    base: &[u8],
+    strokes: &[std::sync::Arc<StrokeRecord>],
+    document_id: Uuid,
+) -> Result<(Vec<u8>, EditData)> {
+    let mut document = PdfDocument::from_bytes(base)?;
+    ensure_writable(&document)?;
+    let mut data = read_edit_data(&document)
+        .unwrap_or_else(|error| {
+            log::warn!("Replacing ignored edit metadata during save: {error:#}");
+            None
+        })
+        .unwrap_or(EditData {
+            format_version: FORMAT_VERSION,
+            document_id,
+            strokes: Vec::new(),
+        });
+    let mut ids: HashSet<_> = data.strokes.iter().map(|s| s.stroke.id).collect();
+    // Also reserve UUIDs of standard annotations whose metadata was discarded.
+    for index in 0..document.page_count()? {
+        for annotation in document.load_pdf_page(index)?.annotations() {
+            if let Some(name) = annotation.object().get_dict("NM")?
+                && let Ok(id) = Uuid::parse_str(&name.as_string()?)
+            {
+                ids.insert(id);
+            }
+        }
+    }
+    let mut counts = vec![0; document.page_count()? as usize];
+    for index in 0..document.page_count()? {
+        counts[index as usize] = document.load_pdf_page(index)?.annotations().count();
+    }
+    for stroke in strokes {
+        ensure!(ids.insert(stroke.id), "Duplicate stroke UUID");
+        let index = stroke.page_index as usize;
+        ensure!(index < counts.len(), "Stroke page is out of range");
+        data.strokes.push(add_stroke(&mut document, stroke)?);
+        counts[index] += 1;
+    }
     flatten_embedded_files(&document)?;
+    remove_edit_attachments(&document)?;
+    let filename = data.filename();
     document.add_embedded_file(
         &filename,
-        &payload,
+        &data.encode()?,
         EmbeddedFileOptions {
             mime_type: Some("application/zstd"),
             ..EmbeddedFileOptions::new(&filename)
@@ -155,47 +179,108 @@ pub(super) fn save_probe(base: &[u8], stroke: &StrokeRecord, output: &Path) -> R
     let mut bytes = Vec::new();
     document
         .write_to(&mut bytes)
-        .context("Serialize test PDF")?;
+        .context("Serialize PDF save snapshot")?;
     let reopened = PdfDocument::from_bytes(&bytes)?;
     ensure!(
         reopened.page_count()? == document.page_count()?,
         "Saved page count changed"
     );
     for index in 0..document.page_count()? {
+        let before = document.load_pdf_page(index)?;
+        let after = reopened.load_pdf_page(index)?;
         ensure!(
-            page_geometry(&document.load_pdf_page(index)?)?
-                == page_geometry(&reopened.load_pdf_page(index)?)?,
+            page_geometry(&before)? == page_geometry(&after)?,
             "Saved page geometry changed"
         );
+        ensure!(
+            after.annotations().count() == counts[index as usize],
+            "Saved annotation count changed"
+        );
     }
+    verify_data(&bytes, &data)?;
+    Ok((bytes, data))
+}
+
+pub(super) fn verify_data(bytes: &[u8], expected: &EditData) -> Result<()> {
+    let reopened = PdfDocument::from_bytes(bytes)?;
     ensure!(
-        reopened.load_pdf_page(0)?.annotations().count() == original_annotations + 1,
-        "Saved annotation count changed"
-    );
-    ensure!(
-        read_edit_data(&reopened)? == Some(data.clone()),
+        read_edit_data(&reopened)? == Some(expected.clone()),
         "Saved edit data does not match"
     );
-    // create_new also rejects same-path/hardlink overwrites and existing outputs.
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(output)
-        .context("Create new test PDF (existing files are never overwritten)")?;
-    use std::io::Write;
-    file.write_all(&bytes)?;
-    file.sync_all()?;
-    drop(file);
-    let disk = PdfDocument::from_bytes(&read_pdf(output)?)?;
-    ensure!(
-        read_edit_data(&disk)? == Some(data),
-        "On-disk edit data does not match"
+    Ok(())
+}
+
+fn remove_edit_attachments(document: &PdfDocument) -> Result<()> {
+    let Some(names) = document.catalog()?.get_dict("Names")? else {
+        return Ok(());
+    };
+    let Some(mut tree) = names.get_dict("EmbeddedFiles")? else {
+        return Ok(());
+    };
+    let array = required(&tree, "Names")?;
+    let mut kept = document.new_array()?;
+    for index in (0..array.len()?).step_by(2) {
+        let name = array
+            .get_array(index as i32)?
+            .context("Missing attachment name")?;
+        let text = name.as_string()?;
+        if !(text.starts_with("naive-note.") && text.ends_with(".cbor.zst")) {
+            kept.array_push(name)?;
+            kept.array_push(
+                array
+                    .get_array(index as i32 + 1)?
+                    .context("Missing attachment filespec")?,
+            )?;
+        }
+    }
+    tree.dict_put("Names", kept)?;
+    Ok(())
+}
+
+/// Persist the draft's squared paper as ordinary PDF page content.
+pub(super) fn draft_pdf(geometry: PageGeometry) -> Result<Vec<u8>> {
+    let mut document = PdfDocument::new();
+    let crop = geometry.crop_box();
+    let page = document.new_page_at(0, mupdf::Size::new(crop.max.x as f32, crop.max.y as f32))?;
+    let mut object = page.object();
+    let rect = [crop.min.x, crop.min.y, crop.max.x, crop.max.y];
+    object.dict_put("MediaBox", numbers(&document, &rect)?)?;
+    object.dict_put("CropBox", numbers(&document, &rect)?)?;
+    object.dict_put("Rotate", PdfObject::new_int(geometry.rotation().degrees())?)?;
+    object.dict_put(
+        "UserUnit",
+        PdfObject::new_real(geometry.user_unit() as f32)?,
+    )?;
+    let size = geometry.unrotated_size();
+    let unit = geometry.user_unit();
+    let mut content = format!(
+        "q\n0.8627451 0.9215686 0.9921569 RG\n{:.8} w\n",
+        0.45 / unit
     );
-    Ok(format!(
-        "Verified {}: 1 new Ink annotation, {} samples, pressure AP and CBOR+Zstd attachment",
-        output.display(),
-        stroke.modeled_samples.len()
-    ))
+    for i in 1..=(size.width / 18.0) as u32 {
+        let x = crop.min.x + f64::from(i) * 18.0 / unit;
+        writeln!(
+            content,
+            "{x:.6} {:.6} m {x:.6} {:.6} l",
+            crop.min.y, crop.max.y
+        )?;
+    }
+    for i in 1..=(size.height / 18.0) as u32 {
+        let y = crop.max.y - f64::from(i) * 18.0 / unit;
+        writeln!(
+            content,
+            "{:.6} {y:.6} m {:.6} {y:.6} l",
+            crop.min.x, crop.max.x
+        )?;
+    }
+    content.push_str("S\nQ\n");
+    object.dict_put(
+        "Contents",
+        document.add_stream(&Buffer::from_bytes(content.as_bytes())?, None, false)?,
+    )?;
+    let mut bytes = Vec::new();
+    document.write_to(&mut bytes)?;
+    Ok(bytes)
 }
 
 fn flatten_embedded_files(document: &PdfDocument) -> Result<()> {
@@ -274,7 +359,7 @@ pub(super) fn read_edit_data(document: &PdfDocument) -> Result<Option<EditData>>
     if let Some(length) = stream.get_dict("Length")? {
         ensure!(
             length.as_int()? >= 0 && length.as_int()? as usize <= MAX_EDIT_BYTES,
-            "Edit attachment exceeds the probe limit"
+            "Edit attachment exceeds the 8 MiB limit"
         );
     }
     let data = EditData::decode(&stream.read_stream()?)?;

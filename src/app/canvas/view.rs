@@ -44,12 +44,15 @@ impl Default for CanvasView {
     fn default() -> Self {
         Self::new(vec![
             PageGeometry::new(Rect::new(20.0, 30.0, 615.0, 872.0), Rotation::R0, 1.0)
-                .expect("valid built-in test page"),
+                .expect("valid draft paper"),
         ])
     }
 }
 
 impl CanvasView {
+    pub fn draft_page(&self) -> PageGeometry {
+        self.original_pages[0]
+    }
     pub fn draft() -> Self {
         Self {
             fit_to_page: false,
@@ -199,7 +202,7 @@ impl CanvasView {
         }
     }
 
-    pub fn scenes(&self, viewport: CanvasViewport, test_page: bool) -> Vec<PageScene> {
+    pub fn scenes(&self, viewport: CanvasViewport, draft_paper: bool) -> Vec<PageScene> {
         let area = Rect {
             min: self.transform.logical_to_paper(viewport.logical.min),
             max: self.transform.logical_to_paper(viewport.logical.max),
@@ -213,10 +216,9 @@ impl CanvasView {
                 view: self.transform.for_page(page.bounds.min),
                 bitmap: None,
                 tiles: Vec::new(),
-                demo_stroke: None,
                 strokes: Vec::new(),
                 active_stroke: None,
-                test_page,
+                draft_paper,
             })
             .collect()
     }

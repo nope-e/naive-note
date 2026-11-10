@@ -4,7 +4,7 @@ use skia_safe::{
     Canvas, Color, FilterMode, Image, Paint, Rect as SkRect, SamplingOptions, paint::Style,
 };
 
-use super::{PageScene, test_page};
+use super::{PageScene, draft_paper};
 use crate::document::{CanvasViewport, PathCommand, PenStyle, Point, StrokeRecord};
 
 pub(super) fn draw(
@@ -106,10 +106,10 @@ pub(super) fn draw(
             );
             canvas.restore();
         }
-    } else if scene.test_page {
-        test_page::draw_contents(canvas, scene.source_page);
+    } else if scene.draft_paper {
+        draft_paper::draw_contents(canvas, scene.source_page);
     }
-    for stroke in scene.strokes.iter().chain(scene.demo_stroke.iter()) {
+    for stroke in &scene.strokes {
         draw_stroke(canvas, stroke);
     }
     if let Some(active) = &scene.active_stroke {
@@ -123,7 +123,7 @@ pub(super) fn draw(
         .set_stroke_width(1.0 / scale)
         .set_color(Color::from_rgb(0xD9, 0xDC, 0xE2));
     canvas.draw_rect(paper, &paint);
-    if scene.test_page {
+    if scene.draft_paper {
         paint.set_color(Color::from_rgb(0x38, 0xA0, 0x73));
         let r = 5.0 / scale;
         canvas.draw_line((-r, -r), (r, r), &paint);
