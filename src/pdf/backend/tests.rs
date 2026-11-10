@@ -240,7 +240,7 @@ fn worker_refinement_is_superseded_and_preserves_session_after_failed_open() {
     match received.recv_timeout(Duration::from_secs(5)).unwrap() {
         PdfResponse::Tiles(response) => {
             assert_eq!(response.request, newest);
-            assert_eq!(response.document, Some(document));
+            assert_eq!(response.document, document);
             assert_eq!(response.result.unwrap()[0].key.x, 1);
         }
         _ => panic!("expected the latest tile job"),
@@ -356,7 +356,7 @@ fn worker_saves_snapshot_and_keeps_the_immutable_preview_session_available() {
         .unwrap();
     let output = match receiver.recv_timeout(Duration::from_secs(5)).unwrap() {
         PdfResponse::Saved(response) => {
-            assert_eq!(response.document, document);
+            assert_eq!(response.document, Some(document));
             assert_eq!(response.request, request);
             response.result.unwrap().path
         }
