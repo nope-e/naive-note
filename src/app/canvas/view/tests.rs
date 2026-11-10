@@ -31,6 +31,42 @@ fn setup() -> (CanvasView, CanvasViewport) {
     (view, viewport)
 }
 
+#[test]
+fn appended_pages_keep_view_rotation_zoom_and_input_mapping_and_removal_clamps_current() {
+    let (mut view, viewport) = setup();
+    view.apply_action(ViewAction::Rotate, viewport.logical);
+    view.apply_action(ViewAction::Zoom(1.2), viewport.logical);
+    let zoom = view.transform.zoom();
+    let last = view.original_pages[1];
+    let mut pages = view.original_pages.clone();
+    pages.push(last);
+    view.set_pages(pages);
+    view.go_to_page(2);
+    assert_eq!(view.page_count(), 3);
+    assert_eq!(view.page(), last.with_rotation(last.rotation().next()));
+    assert_eq!(view.transform.zoom(), zoom);
+    let scene = view
+        .scenes(viewport, false)
+        .into_iter()
+        .find(|page| page.index == 2)
+        .unwrap();
+    let physical = viewport.logical_to_physical(
+        scene
+            .view
+            .paper_to_logical(Point::new(scene.page.paper_size().width * 0.5, 10.)),
+    );
+    let target = view.stroke_target(physical).unwrap();
+    assert_eq!(target.page_index, 2);
+    assert_eq!(target.original, last);
+    view.set_pages(view.original_pages[..2].to_vec());
+    assert_eq!(view.current_page(), 1);
+    assert_eq!(view.page_count(), 2);
+    assert_eq!(view.transform.zoom(), zoom);
+    let before = view.transform;
+    view.set_pages(view.original_pages.clone());
+    assert_eq!(view.transform, before);
+}
+
 fn near(actual: Point, expected: Point) {
     assert!(
         (actual.x - expected.x).abs() < 1e-8 && (actual.y - expected.y).abs() < 1e-8,

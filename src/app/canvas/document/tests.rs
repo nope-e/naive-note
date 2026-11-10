@@ -7,6 +7,38 @@ fn document() -> CanvasDocument {
     CanvasDocument::with_worker(PdfWorker::new(|_| {}).unwrap())
 }
 
+#[test]
+fn appended_pages_follow_the_last_source_geometry_and_document_history() {
+    let mut document = document();
+    let mut pdf = fixture_pdf();
+    let last = PageGeometry::new(Rect::new(-40., 30., 260., 230.), Rotation::R270, 2.).unwrap();
+    pdf.pages.push(last);
+    pdf.page_count = 2;
+    document.pending = Some(7);
+    let draft = pdf.pages[0];
+    document.opened(OpenResponse {
+        request: 7,
+        result: Ok(pdf),
+    });
+    assert!(document.append_page(draft));
+    assert_eq!(document.pages(draft), [draft, last, last]);
+    assert!(document.label(2).contains("PDF page 3 / 3"));
+    let saved = document.revision().current;
+    document.edits.mark_saved(saved);
+    document.undo();
+    assert_eq!(document.pages(draft), [draft, last]);
+    assert!(document.is_dirty());
+    document.redo();
+    assert!(!document.is_dirty());
+    assert!(document.append_page(draft));
+    assert_eq!(document.pages(draft), [draft, last, last, last]);
+    document.pending = Some(8);
+    assert!(!document.append_page(draft));
+    document.close();
+    assert_eq!(document.pages(draft), [draft]);
+    assert!(!document.is_dirty());
+}
+
 fn fixture_pdf() -> LoadedPdf {
     use crate::pdf::PageBitmap;
     let geometry = PageGeometry::new(Rect::new(0.0, 0.0, 600.0, 800.0), Rotation::R0, 1.0).unwrap();

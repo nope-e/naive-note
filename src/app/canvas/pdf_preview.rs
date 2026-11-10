@@ -258,4 +258,35 @@ mod tests {
         assert!(!preview.page_cache.contains(&1));
         assert!(preview.page_cache.contains(&64));
     }
+
+    #[test]
+    fn locally_appended_paper_never_requests_an_out_of_range_source_page() {
+        use crate::app::canvas::view::CanvasView;
+        use crate::document::CanvasViewport;
+        let image = bitmap(Arc::from([]));
+        let mut view = CanvasView::new(vec![image.geometry, image.geometry]);
+        let viewport = CanvasViewport::new(Rect::new(0., 0., 800., 600.), 1., (800, 600)).unwrap();
+        view.update_viewport(viewport);
+        view.go_to_page(1);
+        let mut scene = CanvasScene {
+            viewport,
+            pages: view.scenes(viewport, false),
+        };
+        scene.pages.retain(|page| page.index == 1);
+        assert_eq!(scene.pages.len(), 1);
+        let mut preview = PdfPreview::new(10, image, crate::document::ReferenceLines::default(), 1);
+        let worker =
+            PdfWorker::new(|_| panic!("blank paper should not ask the worker to render")).unwrap();
+        preview.update(
+            &egui::Context::default(),
+            &worker,
+            &mut scene,
+            1,
+            false,
+            crate::document::ReferenceLines::default(),
+        );
+        assert!(preview.pages.is_empty() && preview.visible.is_empty());
+        assert!(preview.pending.is_none() && preview.failed.is_empty());
+        assert!(scene.pages[0].bitmap.is_none() && scene.pages[0].tiles.is_empty());
+    }
 }

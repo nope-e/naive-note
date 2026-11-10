@@ -80,22 +80,19 @@ fn down_in_ui_cannot_become_canvas_ink_and_cancel_is_terminal() {
 fn outside_page_or_loading_contacts_never_join_a_stroke_midway() {
     let (mut input, mut view, position) = setup();
     let target = view.stroke_target(position).unwrap();
-    let gap = target
+    let outside_paper = target
         .viewport
-        .logical_to_physical(target.view.paper_to_logical(Point::new(
-            150.0,
-            target.original.paper_size().height + 12.0,
-        )));
+        .logical_to_physical(target.view.paper_to_logical(Point::new(-12.0, 150.0)));
     assert!(
         target
             .viewport
             .logical
-            .contains(target.viewport.physical_to_logical(gap))
+            .contains(target.viewport.physical_to_logical(outside_paper))
     );
-    assert!(view.stroke_target(gap).is_none());
+    assert!(view.stroke_target(outside_paper).is_none());
     for (start, enabled) in [
         (Point::new(1.0, 400.0), true),
-        (gap, true),
+        (outside_paper, true),
         (position, false),
     ] {
         input.pen(

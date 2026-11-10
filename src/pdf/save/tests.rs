@@ -735,6 +735,96 @@ fn page_content(document: &PdfDocument, page: i32, references: bool) -> Vec<Vec<
 }
 
 #[test]
+fn appended_pages_preserve_mixed_source_content_and_last_page_geometry_without_copying_content() {
+    use crate::document::{ReferenceLines, ReferencePattern};
+    for rotation in [0, 90, 180, 270] {
+        let original = PdfDocument::from_bytes(&fixture(rotation)).unwrap();
+        let mut last = original.load_pdf_page(1).unwrap().object();
+        last.dict_put(
+            "MediaBox",
+            numbers(&original, &[-40., -30., 260., 170.]).unwrap(),
+        )
+        .unwrap();
+        last.dict_put("Rotate", PdfObject::new_int(rotation).unwrap())
+            .unwrap();
+        last.dict_put("UserUnit", PdfObject::new_real(2.).unwrap())
+            .unwrap();
+        let geometry = page_geometry(&original.load_pdf_page(1).unwrap()).unwrap();
+        let mut base = Vec::new();
+        original.write_to(&mut base).unwrap();
+        let layer = ReferenceLayer {
+            lines: ReferenceLines {
+                pattern: ReferencePattern::None,
+                ..ReferenceLines::default()
+            },
+            embed_in_pdf: false,
+        };
+        let mut stroke = pressure_stroke(geometry).unwrap();
+        stroke.page_index = 2;
+        let stroke = std::sync::Arc::new(stroke);
+        for _ in 0..2 {
+            let (bytes, data) = serialize_with_reference(
+                &base,
+                std::slice::from_ref(&stroke),
+                Uuid::new_v4(),
+                layer,
+                &[geometry, geometry],
+            )
+            .unwrap();
+            assert_eq!(data.strokes[0].stroke.page_index, 2);
+            let saved = PdfDocument::from_bytes(&bytes).unwrap();
+            assert_eq!(saved.page_count().unwrap(), 4);
+            for index in 0..2 {
+                assert_eq!(
+                    page_content(&saved, index, false),
+                    page_content(&original, index, false)
+                );
+                assert_eq!(
+                    saved.load_pdf_page(index).unwrap().annotations().count(),
+                    original.load_pdf_page(index).unwrap().annotations().count()
+                );
+            }
+            for index in 2..4 {
+                let page = saved.load_pdf_page(index).unwrap();
+                assert_eq!(page_geometry(&page).unwrap(), geometry);
+                assert!(page_content(&saved, index, false).iter().all(Vec::is_empty));
+                assert_eq!(page.annotations().count(), usize::from(index == 2));
+            }
+            assert_eq!(
+                saved.load_embedded_file("existing.txt").unwrap().unwrap(),
+                b"keep this attachment"
+            );
+            // Reopening adopts these pages as source; only the next addition is appended.
+            let (extended, _) = serialize_with_reference(
+                &bytes,
+                std::slice::from_ref(&stroke),
+                Uuid::new_v4(),
+                layer,
+                &[geometry],
+            )
+            .unwrap();
+            assert_eq!(
+                PdfDocument::from_bytes(&extended)
+                    .unwrap()
+                    .page_count()
+                    .unwrap(),
+                5
+            );
+        }
+        // Undoing an addition saves fewer pages against the unchanged source.
+        let (bytes, _) =
+            serialize_with_reference(&base, &[], Uuid::new_v4(), layer, &[geometry]).unwrap();
+        assert_eq!(
+            PdfDocument::from_bytes(&bytes)
+                .unwrap()
+                .page_count()
+                .unwrap(),
+            3
+        );
+    }
+}
+
+#[test]
 fn reference_vectors_roundtrip_replace_without_duplicates_and_preserve_source_content() {
     use crate::document::{ReferenceLines, ReferencePattern};
     for rotation in [0, 90, 180, 270] {

@@ -290,7 +290,80 @@ struct AutosaveFixture {
     root: PathBuf,
 }
 
+#[test]
+fn appended_blank_pages_and_ink_survive_autosave_recovery_repeat_saves_and_undo() {
+    let mut fixture = AutosaveFixture::new();
+    let page = PageGeometry::new(Rect::new(-30., -40., 270., 160.), Rotation::R90, 2.).unwrap();
+    fixture
+        .workspace
+        .apply_transition(DocumentAction::Create(page));
+    fixture.workspace.append_page();
+    assert_eq!(fixture.workspace.view.current_page(), 1);
+    assert_eq!(fixture.workspace.view.page_count(), 2);
+    let mut stroke = crate::ink::test_support::pressure_stroke(page).unwrap();
+    stroke.page_index = 1;
+    fixture.workspace.document.add_stroke(Arc::new(stroke));
+    assert!(fixture.tick());
+    fixture.workspace.append_page(); // This page is newer than the in-flight snapshot.
+    fixture.receive();
+    let copy = std::fs::read_dir(fixture.root.join("drafts"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let page_count = |path: &std::path::Path| {
+        mupdf::pdf::PdfDocument::from_bytes(&std::fs::read(path).unwrap())
+            .unwrap()
+            .page_count()
+            .unwrap()
+    };
+    assert_eq!(page_count(&copy), 2);
+    assert!(fixture.tick());
+    fixture.receive();
+    assert_eq!(page_count(&copy), 3);
+    fixture.workspace.document.recover(copy);
+    fixture.receive();
+    assert_eq!(fixture.workspace.view.page_count(), 3);
+    assert_eq!(fixture.workspace.document.strokes(1).len(), 1);
+    fixture.workspace.view.go_to_page(0);
+    fixture.workspace.append_page(); // Only the last page exposes the add action.
+    assert_eq!(fixture.workspace.view.page_count(), 3);
+    fixture.workspace.view.go_to_page(2);
+    fixture.workspace.append_page();
+    assert_eq!(fixture.workspace.view.current_page(), 3);
+    assert_eq!(fixture.workspace.view.page(), page);
+    let named = fixture.root.join("extended.pdf");
+    fixture.workspace.save_dialog_result(Some(named.clone()));
+    fixture.receive_save();
+    assert_eq!(page_count(&named), 4);
+    assert!(!fixture.workspace.document.is_dirty());
+    fixture.workspace.request_save(false);
+    fixture.receive_save();
+    assert_eq!(page_count(&named), 4);
+    fixture.workspace.document.undo();
+    fixture.workspace.sync_document_pages();
+    assert_eq!(fixture.workspace.view.current_page(), 2);
+    fixture.workspace.request_save(false);
+    fixture.receive_save();
+    assert_eq!(page_count(&named), 3);
+    fixture.workspace.document.redo();
+    fixture.workspace.sync_document_pages();
+    fixture.workspace.request_save(false);
+    fixture.receive_save();
+    assert_eq!(page_count(&named), 4);
+}
+
 impl AutosaveFixture {
+    fn receive_save(&mut self) {
+        assert!(self.workspace.document.is_saving());
+        // Recovery cleanup can arrive before the save response.
+        while self.workspace.document.is_saving() {
+            self.receive();
+        }
+        assert!(self.workspace.document.notice().is_none());
+    }
+
     fn new() -> Self {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join(".scratch")
