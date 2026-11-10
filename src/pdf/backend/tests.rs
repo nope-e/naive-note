@@ -349,6 +349,7 @@ fn worker_saves_snapshot_and_keeps_the_immutable_preview_session_available() {
             revision: 1,
             strokes: vec![Arc::new(pressure_stroke(geometry).unwrap())],
             draft_page: geometry,
+            appended_pages: vec![],
             reference_lines: crate::document::ReferenceLayer {
                 lines: crate::document::ReferenceLines::default(),
                 embed_in_pdf: true,
@@ -429,6 +430,7 @@ fn saving_a_closed_session_returns_an_error_without_creating_output() {
             revision: 1,
             strokes: vec![Arc::new(pressure_stroke(geometry).unwrap())],
             draft_page: geometry,
+            appended_pages: vec![],
             reference_lines: crate::document::ReferenceLayer {
                 lines: crate::document::ReferenceLines::default(),
                 embed_in_pdf: true,
@@ -608,6 +610,7 @@ fn pdf_reference_settings_default_to_none_and_restore_saved_document_settings() 
                 &[],
                 uuid::Uuid::new_v4(),
                 layer,
+                &[],
             )
             .unwrap();
             let session = PdfSession::from_bytes(&bytes).unwrap();
@@ -631,9 +634,14 @@ fn saved_reference_vectors_are_removed_only_from_the_live_render_document() {
         lines: ReferenceLines::default(),
         embed_in_pdf: true,
     };
-    let (bytes, _) =
-        super::super::save::serialize_with_reference(&source, &[], uuid::Uuid::new_v4(), layer)
-            .unwrap();
+    let (bytes, _) = super::super::save::serialize_with_reference(
+        &source,
+        &[],
+        uuid::Uuid::new_v4(),
+        layer,
+        &[],
+    )
+    .unwrap();
     let session = PdfSession::from_bytes(&bytes).unwrap();
     assert_eq!(session.base(), bytes);
     assert_eq!(
@@ -723,6 +731,7 @@ fn reopened_display_list_keeps_foreign_ink_and_moves_verified_ink_to_editable_ov
                 lines,
                 embed_in_pdf: true,
             },
+            &[],
         )
         .unwrap();
         for metadata in [true, false] {

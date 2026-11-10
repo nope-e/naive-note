@@ -18,6 +18,7 @@ fn worker_saves_draft_revisions_detects_conflicts_and_can_save_as() {
         revision,
         strokes,
         draft_page: page,
+        appended_pages: vec![],
         reference_lines: crate::document::ReferenceLayer {
             lines: crate::document::ReferenceLines::default(),
             embed_in_pdf: true,

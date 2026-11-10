@@ -51,6 +51,8 @@ pub struct SaveSnapshot {
     pub revision: u64,
     pub strokes: Vec<Arc<StrokeRecord>>,
     pub draft_page: PageGeometry,
+    /// Session additions over the immutable source, captured at this revision.
+    pub appended_pages: Vec<PageGeometry>,
     pub reference_lines: ReferenceLayer,
     pub document_id: uuid::Uuid,
     pub path: PathBuf,

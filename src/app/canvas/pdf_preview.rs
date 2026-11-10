@@ -19,6 +19,7 @@ const MAX_DETAIL_TILES: usize = 96;
 
 pub(super) struct PdfPreview {
     document: u64,
+    source_page_count: u32,
     tile_cache: ByteLru<TileKey, PageTile>,
     page_cache: ByteLru<u32, PageBitmap>,
     visible: Vec<TileKey>,
@@ -34,11 +35,13 @@ impl PdfPreview {
         document: u64,
         first_page: Arc<PageBitmap>,
         reference_lines: crate::document::ReferenceLines,
+        source_page_count: u32,
     ) -> Self {
         let mut page_cache = ByteLru::new(PAGE_CACHE_BYTES);
         page_cache.insert(0, first_page, |page| page.rgba.len());
         Self {
             document,
+            source_page_count,
             tile_cache: ByteLru::new(TILE_CACHE_BYTES),
             page_cache,
             visible: Vec::new(),
@@ -96,10 +99,19 @@ impl PdfPreview {
             self.tile_cache = ByteLru::new(TILE_CACHE_BYTES);
             self.failed.clear();
         }
-        let mut pages: Vec<_> = scene.pages.iter().map(|page| page.index).collect();
+        let mut pages: Vec<_> = scene
+            .pages
+            .iter()
+            .filter(|page| page.index < self.source_page_count)
+            .map(|page| page.index)
+            .collect();
         pages.sort_by_key(|page| page.abs_diff(current_page));
         let mut visible = Vec::new();
         for page in &mut scene.pages {
+            // Appended blank paper is drawn locally until the PDF is reopened.
+            if page.index >= self.source_page_count {
+                continue;
+            }
             page.bitmap = self.page_cache.get(&page.index);
             if let Some(preview) = &page.bitmap {
                 visible.extend(visible_tiles(
@@ -200,6 +212,7 @@ mod tests {
             10,
             Arc::clone(&image),
             crate::document::ReferenceLines::default(),
+            1,
         );
         preview.pending = Some(20);
         preview
@@ -228,6 +241,7 @@ mod tests {
             10,
             Arc::clone(&image),
             crate::document::ReferenceLines::default(),
+            1,
         );
         for page in 1..64 {
             preview.pending = Some(20);

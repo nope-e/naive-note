@@ -26,6 +26,7 @@ pub(super) enum ToolbarAction {
     Close,
     Undo,
     Redo,
+    AppendPage,
     Tool(CanvasTool),
     DeleteSelected,
     ClearSelection,

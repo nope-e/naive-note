@@ -18,6 +18,7 @@ fn serialize(
             lines: crate::document::ReferenceLines::default(),
             embed_in_pdf: false,
         },
+        &[],
     )
 }
 
@@ -255,6 +256,7 @@ fn draft_serializes_its_original_paper_geometry_and_configurable_background() {
             lines: crate::document::ReferenceLines::default(),
             embed_in_pdf: true,
         },
+        &[],
     )
     .unwrap();
     assert_eq!(data.strokes.len(), 1);
@@ -749,9 +751,10 @@ fn reference_vectors_roundtrip_replace_without_duplicates_and_preserve_source_co
                 embed_in_pdf: true,
             };
             let (bytes, data) =
-                serialize_with_reference(&base, &[], Uuid::new_v4(), layer).unwrap();
+                serialize_with_reference(&base, &[], Uuid::new_v4(), layer, &[]).unwrap();
             assert_eq!(data.reference_lines, Some(layer));
-            let (bytes, _) = serialize_with_reference(&bytes, &[], Uuid::new_v4(), layer).unwrap();
+            let (bytes, _) =
+                serialize_with_reference(&bytes, &[], Uuid::new_v4(), layer, &[]).unwrap();
             let saved = PdfDocument::from_bytes(&bytes).unwrap();
             for page in 0..saved.page_count().unwrap() {
                 assert_eq!(
@@ -774,7 +777,7 @@ fn reference_vectors_roundtrip_replace_without_duplicates_and_preserve_source_co
                 ..layer
             };
             let (bytes, data) =
-                serialize_with_reference(&bytes, &[], Uuid::new_v4(), overlay).unwrap();
+                serialize_with_reference(&bytes, &[], Uuid::new_v4(), overlay, &[]).unwrap();
             assert_eq!(data.reference_lines, Some(overlay));
             let saved = PdfDocument::from_bytes(&bytes).unwrap();
             for page in 0..saved.page_count().unwrap() {

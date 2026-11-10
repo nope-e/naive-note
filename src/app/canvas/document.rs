@@ -146,6 +146,7 @@ impl CanvasDocument {
                     response.request,
                     Arc::clone(&pdf.first_page),
                     pdf.rendered_reference_lines,
+                    pdf.page_count,
                 );
                 self.loaded = Some(OpenDocument { pdf, preview });
                 self.loaded_request = Some(response.request);
@@ -223,6 +224,29 @@ impl CanvasDocument {
         if self.edits.execute(EditCommand::AddStroke(stroke)) {
             self.edit_changed();
         }
+    }
+
+    pub fn pages(&self, draft_page: PageGeometry) -> Vec<PageGeometry> {
+        let mut pages = self
+            .loaded
+            .as_ref()
+            .map_or_else(|| vec![draft_page], |loaded| loaded.pdf.pages.clone());
+        pages.extend_from_slice(&self.edits.appended_pages);
+        pages
+    }
+
+    pub fn append_page(&mut self, draft_page: PageGeometry) -> bool {
+        if !self.can_ink() {
+            return false;
+        }
+        let pages = self.pages(draft_page);
+        if pages.len() >= i32::MAX as usize {
+            return false;
+        }
+        let page = *pages.last().expect("document has a page");
+        self.edits.execute(EditCommand::AppendPage(page));
+        self.edit_changed();
+        true
     }
 
     pub fn strokes(&self, page: u32) -> &[Arc<StrokeRecord>] {
@@ -305,9 +329,14 @@ impl CanvasDocument {
     }
 
     pub fn label(&self, page: u32) -> String {
+        let count = self
+            .loaded
+            .as_ref()
+            .map_or(1, |loaded| loaded.pdf.page_count)
+            + self.edits.appended_pages.len() as u32;
         let label = self.loaded.as_ref().map_or_else(
-            || "Draft page 1 / 1".to_owned(),
-            |loaded| format!("PDF page {} / {}", page + 1, loaded.pdf.page_count),
+            || format!("Draft page {} / {count}", page + 1),
+            |_| format!("PDF page {} / {count}", page + 1),
         );
         let revision = self.revision();
         format!(

@@ -7,10 +7,11 @@ use std::{
 
 use uuid::Uuid;
 
-use super::{ReferenceLayer, StrokeRecord};
+use super::{PageGeometry, ReferenceLayer, StrokeRecord};
 
 #[derive(Clone, Debug)]
 pub enum EditCommand {
+    AppendPage(PageGeometry),
     AddStroke(Arc<StrokeRecord>),
     RemoveStrokes(Vec<RemovedStroke>),
     ReferenceLines {
@@ -47,6 +48,7 @@ struct HistoryEntry {
 
 #[derive(Default)]
 pub struct EditHistory {
+    pub appended_pages: Vec<PageGeometry>,
     strokes: BTreeMap<u32, Vec<Arc<StrokeRecord>>>,
     stroke_ids: HashSet<Uuid>,
     undo: Vec<HistoryEntry>,
@@ -142,6 +144,9 @@ impl EditHistory {
             return false;
         };
         match &entry.command {
+            EditCommand::AppendPage(_) => {
+                self.appended_pages.pop().expect("history page");
+            }
             EditCommand::RemoveStrokes(strokes) => {
                 for removed in strokes {
                     self.stroke_ids.insert(removed.stroke.id);
@@ -184,6 +189,7 @@ impl EditHistory {
 
     fn apply(&mut self, command: &EditCommand) {
         match command {
+            EditCommand::AppendPage(page) => self.appended_pages.push(*page),
             EditCommand::RemoveStrokes(strokes) => {
                 let ids: HashSet<_> = strokes.iter().map(|s| s.stroke.id).collect();
                 self.strokes.retain(|_, page| {

@@ -140,6 +140,7 @@ pub(super) fn serialize_with_reference(
     strokes: &[std::sync::Arc<StrokeRecord>],
     document_id: Uuid,
     reference_lines: ReferenceLayer,
+    appended_pages: &[PageGeometry],
 ) -> Result<(Vec<u8>, EditData)> {
     let mut document = PdfDocument::from_bytes(base)?;
     ensure_writable(&document)?;
@@ -149,6 +150,9 @@ pub(super) fn serialize_with_reference(
     });
     if let Some(data) = &previous {
         remove_editable_ink(&document, data)?;
+    }
+    for geometry in appended_pages {
+        append_blank_page(&mut document, *geometry)?;
     }
     let mut data = EditData {
         format_version: FORMAT_VERSION,
@@ -279,20 +283,28 @@ fn remove_edit_attachments(document: &PdfDocument) -> Result<()> {
 /// Create blank paper; reference vectors are serialized from document settings.
 pub(super) fn draft_pdf(geometry: PageGeometry) -> Result<Vec<u8>> {
     let mut document = PdfDocument::new();
+    append_blank_page(&mut document, geometry)?;
+    let mut bytes = Vec::new();
+    document.write_to(&mut bytes)?;
+    Ok(bytes)
+}
+
+fn append_blank_page(document: &mut PdfDocument, geometry: PageGeometry) -> Result<()> {
     let crop = geometry.crop_box();
-    let page = document.new_page_at(0, mupdf::Size::new(crop.max.x as f32, crop.max.y as f32))?;
+    let page = document.new_page_at(
+        document.page_count()?,
+        mupdf::Size::new(crop.size().width as f32, crop.size().height as f32),
+    )?;
     let mut object = page.object();
     let rect = [crop.min.x, crop.min.y, crop.max.x, crop.max.y];
-    object.dict_put("MediaBox", numbers(&document, &rect)?)?;
-    object.dict_put("CropBox", numbers(&document, &rect)?)?;
+    object.dict_put("MediaBox", numbers(document, &rect)?)?;
+    object.dict_put("CropBox", numbers(document, &rect)?)?;
     object.dict_put("Rotate", PdfObject::new_int(geometry.rotation().degrees())?)?;
     object.dict_put(
         "UserUnit",
         PdfObject::new_real(geometry.user_unit() as f32)?,
     )?;
-    let mut bytes = Vec::new();
-    document.write_to(&mut bytes)?;
-    Ok(bytes)
+    Ok(())
 }
 
 fn flatten_embedded_files(document: &PdfDocument) -> Result<()> {

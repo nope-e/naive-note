@@ -69,16 +69,25 @@ pub(super) fn show(
                     {
                         *action = Some(ToolbarAction::View(ViewAction::GoToPage(page - 1)));
                     }
+                    let last_page = state.document.current_page + 1 == state.document.page_count;
                     if icons::button(
                         ui,
-                        Icon::Next,
-                        "下一页 · PageDown",
+                        if last_page { Icon::Plus } else { Icon::Next },
+                        if last_page {
+                            "新增一页 · 与末页同尺寸"
+                        } else {
+                            "下一页 · PageDown"
+                        },
                         false,
-                        state.document.current_page + 1 < state.document.page_count,
+                        !last_page || state.can_edit_document,
                     )
                     .clicked()
                     {
-                        *action = Some(ToolbarAction::View(ViewAction::NextPage));
+                        *action = Some(if last_page {
+                            ToolbarAction::AppendPage
+                        } else {
+                            ToolbarAction::View(ViewAction::NextPage)
+                        });
                     }
                 });
             });

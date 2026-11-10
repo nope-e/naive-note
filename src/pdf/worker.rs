@@ -299,6 +299,7 @@ fn save_snapshot(snapshot: &SaveSnapshot, session: Option<&(u64, PdfSession)>) -
         &snapshot.strokes,
         snapshot.document_id,
         snapshot.reference_lines,
+        &snapshot.appended_pages,
     )?;
     let fingerprint = storage::save_atomic(&snapshot.path, expected, &bytes, |path| {
         let disk = super::save::read_pdf(path)?;

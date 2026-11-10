@@ -91,6 +91,40 @@ impl CanvasView {
         self.layout.pages().len() as u32
     }
 
+    /// Keep the reading orientation and zoom when document history adds/removes pages.
+    pub fn set_pages(&mut self, pages: Vec<PageGeometry>) {
+        if self.original_pages == pages {
+            return;
+        }
+        let rotation = (self.layout.pages()[0].geometry.rotation().degrees()
+            - self.original_pages[0].rotation().degrees())
+        .rem_euclid(360);
+        let displayed: Vec<_> = pages
+            .iter()
+            .map(|page| {
+                let mut page = *page;
+                for _ in 0..rotation / 90 {
+                    page = page.with_rotation(page.rotation().next());
+                }
+                page
+            })
+            .collect();
+        self.original_pages = pages;
+        self.layout = PageLayout::new(&displayed);
+        self.go_to_page(self.current as u32);
+    }
+
+    pub fn go_to_page(&mut self, index: u32) {
+        self.current = (index as usize).min(self.layout.pages().len() - 1);
+        if let Some(viewport) = self.viewport {
+            if self.fit_to_page || self.fit_width {
+                self.fit(viewport.logical);
+            } else {
+                self.position_page(viewport.logical, false);
+            }
+        }
+    }
+
     fn fit(&mut self, viewport: Rect) {
         let page = self.layout.pages()[self.current];
         if self.fit_width {

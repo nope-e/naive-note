@@ -230,6 +230,24 @@ impl CanvasWorkspace {
             .receive(self.input.take_object_events(), &mut self.document);
     }
 
+    fn sync_document_pages(&mut self) {
+        self.view
+            .set_pages(self.document.pages(self.view.draft_page()));
+        self.objects.prune(&self.document);
+    }
+
+    fn append_page(&mut self) {
+        if self.canvas_blocked()
+            || self.view.current_page() + 1 != self.view.page_count()
+            || !self.document.append_page(self.view.draft_page())
+        {
+            return;
+        }
+        self.objects.clear();
+        self.sync_document_pages();
+        self.view.go_to_page(self.view.page_count() - 1);
+    }
+
     pub fn pen_sample(&mut self, event: crate::platform::PenEvent, over_ui: bool) -> bool {
         let blocked = self.canvas_blocked();
         let can_ink = self.document.can_ink() && !blocked;
@@ -396,10 +414,16 @@ impl CanvasWorkspace {
                 }
                 Some(ToolbarAction::Undo) => {
                     self.document.undo();
+                    self.sync_document_pages();
                     action = None;
                 }
                 Some(ToolbarAction::Redo) => {
                     self.document.redo();
+                    self.sync_document_pages();
+                    action = None;
+                }
+                Some(ToolbarAction::AppendPage) => {
+                    self.append_page();
                     action = None;
                 }
                 Some(ToolbarAction::Tool(tool)) => {

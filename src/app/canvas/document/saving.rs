@@ -117,6 +117,7 @@ impl CanvasDocument {
             revision,
             strokes: self.edits.snapshot(),
             draft_page,
+            appended_pages: self.edits.appended_pages.clone(),
             reference_lines: self.reference_layer(),
             document_id: self.document_id,
             path: path.clone(),
