@@ -39,6 +39,8 @@ pub struct LoadedPdf {
     pub pages: Vec<PageGeometry>,
     pub first_page: Arc<PageBitmap>,
     pub edit_data_status: String,
+    /// Verified native ink, omitted from preview bitmaps and drawn as editable objects.
+    pub strokes: Vec<Arc<StrokeRecord>>,
     pub reference_lines: Option<ReferenceLayer>,
     pub rendered_reference_lines: crate::document::ReferenceLines,
     pub fingerprint: FileFingerprint,

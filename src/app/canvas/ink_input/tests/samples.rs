@@ -139,11 +139,13 @@ fn page_and_down_transform_remain_bound_outside_the_page() {
 }
 
 #[test]
-fn eraser_end_is_ignored_until_an_eraser_tool_exists() {
+fn eraser_end_routes_an_object_gesture_without_ink() {
     let (mut input, mut view, position) = setup();
     let mut down = sample(PenPhase::Down, position);
     down.eraser = true;
     input.pen(down, &mut view, true, egui::Modifiers::NONE);
+    assert!(input.active().is_none());
+    assert!(input.is_drawing());
     assert!(
         input
             .pen(
@@ -155,4 +157,8 @@ fn eraser_end_is_ignored_until_an_eraser_tool_exists() {
             .1
             .is_none()
     );
+    assert!(matches!(
+        input.take_object_events().last(),
+        Some(super::super::ObjectEvent::Finish)
+    ));
 }

@@ -188,8 +188,14 @@ fn session_snapshots_save_multiple_pages_repeat_without_duplicates_and_remove_un
         reopened.load_pdf_page(0).unwrap().annotations().count(),
         original.load_pdf_page(0).unwrap().annotations().count()
     );
-    // A normal reopen establishes a new immutable base, retaining old metadata.
-    let (_, extended) = serialize(&bytes, &[first], Uuid::new_v4()).unwrap();
+    // A reopened editor supplies all surviving objects, including loaded ink.
+    let mut snapshot: Vec<_> = data
+        .strokes
+        .iter()
+        .map(|s| Arc::new(s.stroke.clone()))
+        .collect();
+    snapshot.push(first);
+    let (_, extended) = serialize(&bytes, &snapshot, Uuid::new_v4()).unwrap();
     assert_eq!(extended.document_id, document_id);
     assert_eq!(extended.strokes.len(), 2);
     let (_, empty) = serialize(&base, &[], document_id).unwrap();
@@ -337,7 +343,12 @@ fn strokes_can_leave_the_page_and_return_without_changing_samples_on_save() {
             let data = read_edit_data(&reopened).unwrap().unwrap();
             assert_eq!(data.strokes.len(), 1);
             assert_eq!(data.strokes[0].stroke, *stroke);
-            let (_, resaved) = serialize(&bytes, &[], Uuid::new_v4()).unwrap();
+            let snapshot = data
+                .strokes
+                .iter()
+                .map(|s| std::sync::Arc::new(s.stroke.clone()))
+                .collect::<Vec<_>>();
+            let (_, resaved) = serialize(&bytes, &snapshot, Uuid::new_v4()).unwrap();
             assert_eq!(resaved, data);
         }
     }
@@ -438,28 +449,94 @@ fn same_snapshot_saves_are_stable_and_existing_paths_require_a_known_fingerprint
 }
 
 #[test]
-fn reopened_save_extends_existing_valid_edit_data_without_losing_the_document_uuid() {
+fn reopened_snapshot_replaces_verified_ink_preserves_foreign_objects_and_document_uuid() {
     let directory = TestDirectory::new();
     let first = saved_fixture(&directory);
     let previous = read_edit_data(&PdfDocument::from_bytes(&first).unwrap())
         .unwrap()
         .unwrap();
-    let output = directory.file("second.pdf");
-    save_stroke(&first, &stroke_for(&first), &output).unwrap();
-    let document = PdfDocument::from_bytes(&fs::read(output).unwrap()).unwrap();
+    let old = std::sync::Arc::new(previous.strokes[0].stroke.clone());
+    let fresh = std::sync::Arc::new(stroke_for(&first));
+    let (bytes, _) = serialize(&first, &[old.clone(), fresh.clone()], Uuid::new_v4()).unwrap();
+    let document = PdfDocument::from_bytes(&bytes).unwrap();
     let data = read_edit_data(&document).unwrap().unwrap();
     assert_eq!(data.document_id, previous.document_id);
     assert_eq!(data.strokes.len(), 2);
     assert_eq!(data.strokes[0], previous.strokes[0]);
     assert_eq!(document.embedded_files().unwrap().len(), 2);
-    assert!(
-        save_stroke(
-            &first,
-            &previous.strokes[0].stroke,
-            &directory.file("duplicate.pdf")
-        )
-        .is_err()
+    assert!(serialize(&first, &[old.clone(), old], Uuid::new_v4()).is_err());
+    // Deleting every native object also removes its standard annotation.
+    let (empty, data) = serialize(&bytes, &[], Uuid::new_v4()).unwrap();
+    assert!(data.strokes.is_empty());
+    let document = PdfDocument::from_bytes(&empty).unwrap();
+    assert_eq!(document.load_pdf_page(0).unwrap().annotations().count(), 1);
+    assert_eq!(
+        document
+            .load_embedded_file("existing.txt")
+            .unwrap()
+            .unwrap(),
+        b"keep this attachment"
     );
+    // Undo restores the same native record over the original opened base.
+    let (_, data) = serialize(&first, &[fresh], Uuid::new_v4()).unwrap();
+    assert_eq!(data.strokes.len(), 1);
+}
+
+#[test]
+fn highlighter_appearance_round_trips_blending_and_detects_resource_tampering() {
+    use crate::{
+        document::{CanvasViewport, PenPhase, PenStyle, ViewTransform},
+        ink::{LiveStroke, StrokeTarget},
+    };
+    let base = fixture(90);
+    let document = PdfDocument::from_bytes(&base).unwrap();
+    let geometry = page_geometry(&document.load_pdf_page(0).unwrap()).unwrap();
+    let target = StrokeTarget {
+        page_index: 0,
+        original: geometry,
+        displayed: geometry,
+        view: ViewTransform::default(),
+        viewport: CanvasViewport::new(
+            crate::document::Rect::new(0., 0., 1000., 1000.),
+            1.,
+            (1000, 1000),
+        )
+        .unwrap(),
+    };
+    let mut ink = LiveStroke::new(target, false, PenStyle::highlighter());
+    ink.push_mouse(Point::new(100., 100.), 0, PenPhase::Down);
+    ink.push_mouse(Point::new(200., 100.), 1000, PenPhase::Up);
+    let stroke = ink.finish().unwrap();
+    let (bytes, data) = serialize(&base, std::slice::from_ref(&stroke), Uuid::new_v4()).unwrap();
+    assert_eq!(data.strokes[0].stroke, *stroke);
+    let document = PdfDocument::from_bytes(&bytes).unwrap();
+    let data = read_edit_data(&document).unwrap().unwrap();
+    assert_eq!(data.strokes[0].stroke.style.kind, InkKind::Highlighter);
+    let object = document
+        .load_pdf_page(0)
+        .unwrap()
+        .annotations()
+        .last()
+        .unwrap()
+        .object();
+    let ap = normal_appearance(&object).unwrap();
+    let path = String::from_utf8(ap.read_stream().unwrap()).unwrap();
+    assert_eq!(path.matches("/NNHighlight gs").count(), 1);
+    assert!(path.ends_with("f\nQ\n"));
+    let mut state = required(
+        &required(&required(&ap, "Resources").unwrap(), "ExtGState").unwrap(),
+        "NNHighlight",
+    )
+    .unwrap();
+    assert_eq!(
+        required(&state, "BM").unwrap().as_name().unwrap(),
+        b"Multiply"
+    );
+    assert!((required(&state, "ca").unwrap().as_float().unwrap() - 0.4).abs() < 1e-6);
+    state
+        .dict_put("ca", PdfObject::new_real(1.0).unwrap())
+        .unwrap();
+    assert!(read_edit_data(&document).is_err());
 }
 
 #[test]

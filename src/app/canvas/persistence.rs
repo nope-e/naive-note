@@ -165,6 +165,10 @@ impl super::CanvasWorkspace {
                     self.input.style.color_rgb = settings.color;
                     self.input.style.max_width_pt = settings.width;
                     self.input.style.pressure_gamma = settings.pressure_gamma;
+                    self.input.highlighter_style.color_rgb = settings.highlighter_color;
+                    self.input.highlighter_style.max_width_pt = settings.highlighter_width;
+                    self.input.highlighter_style.pressure_gamma =
+                        settings.highlighter_pressure_gamma;
                     self.input.smoothing = settings.smoothing;
                     self.input.mouse_pen = settings.mouse_pen;
                     self.persistence.timer =
@@ -206,6 +210,9 @@ impl super::CanvasWorkspace {
             color: self.input.style.color_rgb,
             width: self.input.style.max_width_pt,
             pressure_gamma: self.input.style.pressure_gamma,
+            highlighter_color: self.input.highlighter_style.color_rgb,
+            highlighter_width: self.input.highlighter_style.max_width_pt,
+            highlighter_pressure_gamma: self.input.highlighter_style.pressure_gamma,
             smoothing: self.input.smoothing,
             mouse_pen: self.input.mouse_pen,
             ..self.persistence.settings.clone()

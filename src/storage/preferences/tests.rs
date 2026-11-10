@@ -40,6 +40,9 @@ fn settings_roundtrip_rejects_corruption_versions_and_out_of_range_values() {
         autosave_seconds: 5,
         pressure_gamma: 0.5,
         mouse_pen: false,
+        highlighter_color: [255, 170, 20],
+        highlighter_width: 18.,
+        highlighter_pressure_gamma: 0.5,
         ..Settings::default()
     };
     write_settings(&path, &settings).unwrap();
@@ -60,6 +63,14 @@ fn settings_roundtrip_rejects_corruption_versions_and_out_of_range_values() {
         },
         Settings {
             pressure_gamma: -1.,
+            ..settings.clone()
+        },
+        Settings {
+            highlighter_width: 0.,
+            ..settings.clone()
+        },
+        Settings {
+            highlighter_pressure_gamma: -1.,
             ..settings.clone()
         },
     ] {

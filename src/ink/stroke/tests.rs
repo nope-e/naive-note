@@ -1,6 +1,56 @@
 use super::*;
 use crate::document::{CanvasViewport, PageGeometry, Rect, Rotation, ViewTransform};
 
+#[test]
+fn highlighter_stationary_pressure_and_settling_do_not_accumulate_contours_and_resume_connected() {
+    for smoothing in [false, true] {
+        let mut live = stroke(smoothing);
+        Arc::make_mut(&mut live.record).style = PenStyle::highlighter();
+        let mut input = raw(PenPhase::Down, 100., 100., 1_000_000);
+        input.pressure = Some(0.1);
+        live.push(input);
+        for i in 1..=2000 {
+            let mut input = raw(PenPhase::Move, 100., 100., 1_000_000 + i * 5_000);
+            input.pressure = Some(0.1 + 0.8 * (i as f64 / 1000.).min(1.));
+            live.push(input);
+        }
+        let paused = live.snapshot();
+        assert_eq!(paused.record.raw_samples.len(), 2001);
+        assert!(paused.record.modeled_samples.len() > 1000);
+        assert!(
+            paused.record.outline.len() <= 12,
+            "stationary outlines: {}",
+            paused.record.outline.len()
+        );
+        assert!(paused.record.style.width(0.9) > paused.record.style.width(0.1) * 2.);
+        for i in 1..=40 {
+            // Tiny spring-like settling movements must not grow thousands of
+            // contours around an effectively stationary point either.
+            live.push(raw(
+                PenPhase::Move,
+                100. + i as f64 * 0.00001,
+                100.,
+                11_000_000 + i * 5_000,
+            ));
+        }
+        assert!(live.snapshot().record.outline.len() <= 24);
+        live.push(raw(PenPhase::Move, 180., 100., 11_500_000));
+        live.push(raw(PenPhase::Up, 240., 100., 11_600_000));
+        let finished = live.finish().unwrap();
+        assert_eq!(finished.raw_samples.len(), 2043);
+        assert!(
+            finished
+                .outline
+                .iter()
+                .any(|command| matches!(command, PathCommand::LineTo(_))),
+            "resumed ink needs connecting geometry"
+        );
+        finite(&finished);
+        // The original paused snapshot is still immutable.
+        assert!(paused.record.outline.len() <= 12);
+    }
+}
+
 fn stroke(smoothing: bool) -> LiveStroke {
     let page = PageGeometry::new(Rect::new(0.0, 0.0, 600.0, 800.0), Rotation::R0, 1.0).unwrap();
     LiveStroke::new(

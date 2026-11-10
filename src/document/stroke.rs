@@ -5,8 +5,17 @@ use uuid::Uuid;
 
 use super::Point;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InkKind {
+    #[default]
+    Pen,
+    Highlighter,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PenStyle {
+    #[serde(default)]
+    pub kind: InkKind,
     pub color_rgb: [u8; 3],
     pub max_width_pt: f64,
     pub min_width_ratio: f64,
@@ -16,6 +25,7 @@ pub struct PenStyle {
 impl Default for PenStyle {
     fn default() -> Self {
         Self {
+            kind: InkKind::Pen,
             color_rgb: [25, 105, 190],
             max_width_pt: 2.0,
             min_width_ratio: 0.2,
@@ -25,6 +35,15 @@ impl Default for PenStyle {
 }
 
 impl PenStyle {
+    pub fn highlighter() -> Self {
+        Self {
+            kind: InkKind::Highlighter,
+            color_rgb: [247, 196, 14],
+            max_width_pt: 16.0,
+            ..Self::default()
+        }
+    }
+
     pub fn width(&self, pressure: f64) -> f64 {
         self.max_width_pt
             * (self.min_width_ratio

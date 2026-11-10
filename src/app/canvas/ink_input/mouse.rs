@@ -7,7 +7,7 @@ use crate::{
     ink::LiveStroke,
 };
 
-use super::{CanvasInput, CanvasView};
+use super::{CanvasInput, CanvasTool, CanvasView};
 
 impl CanvasInput {
     pub fn mouse_button(
@@ -37,13 +37,21 @@ impl CanvasInput {
                 self.last_position = Some(position);
                 return (true, None);
             }
-            if !self.mouse_pen || !enabled {
+            if !enabled {
+                return (false, None);
+            }
+            if self.begin_object(position, view, self.tool, modifiers.shift) {
+                self.mouse_active = true;
+                self.last_position = Some(position);
+                return (true, None);
+            }
+            if !self.mouse_pen || !matches!(self.tool, CanvasTool::Pen | CanvasTool::Highlighter) {
                 return (false, None);
             }
             let Some(target) = view.stroke_target(position) else {
                 return (false, None);
             };
-            let mut stroke = LiveStroke::new(target, self.smoothing, self.style.clone());
+            let mut stroke = LiveStroke::new(target, self.smoothing, self.current_style().clone());
             stroke.push_mouse(position, self.time_us(), StrokePhase::Down);
             self.active = Some(stroke);
             self.mouse_active = true;
@@ -55,7 +63,14 @@ impl CanvasInput {
                 self.update_navigation(position, view, modifiers);
             }
             if self.navigation.take().is_some() {
+                self.cancel_object();
                 return (true, self.finish_stroke());
+            }
+            if let Some(position) = position {
+                self.move_object(position);
+            }
+            if self.finish_object() {
+                return (true, None);
             }
             let time = self.time_us();
             let completed = self.active.take().and_then(|mut stroke| {
@@ -82,8 +97,10 @@ impl CanvasInput {
         let time = self.time_us();
         self.last_position = Some(position);
         if self.update_navigation(position, view, modifiers) {
+            self.cancel_object();
             return self.finish_stroke();
         }
+        self.move_object(position);
         if let Some(stroke) = self.active.as_mut() {
             stroke.push_mouse(position, time, StrokePhase::Move);
         }

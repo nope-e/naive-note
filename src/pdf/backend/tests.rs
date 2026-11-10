@@ -663,7 +663,7 @@ fn saved_reference_vectors_are_removed_only_from_the_live_render_document() {
 }
 
 #[test]
-fn reopened_display_list_places_references_between_source_and_existing_ink() {
+fn reopened_display_list_keeps_foreign_ink_and_moves_verified_ink_to_editable_overlay() {
     // Inspect vector command order only: no pixels, framebuffer, window or image.
     use crate::document::ReferenceLayer;
     use mupdf::{ColorParams, NativeDevice, StrokeState};
@@ -756,16 +756,22 @@ fn reopened_display_list_places_references_between_source_and_existing_ink() {
                 .iter()
                 .position(|color| *color == lines.color_rgb)
                 .unwrap();
-            let ink = commands
-                .0
-                .iter()
-                .position(|color| *color == [25, 105, 190])
-                .unwrap();
-            assert!(
-                source < reference && reference < ink,
-                "vector order: {:?}",
-                commands.0
-            );
+            let ink = commands.0.iter().position(|color| *color == [25, 105, 190]);
+            assert!(source < reference);
+            if metadata {
+                assert!(
+                    ink.is_none(),
+                    "native ink must only be drawn by the editable overlay"
+                );
+                assert_eq!(session.edit_data.as_ref().unwrap().strokes.len(), 1);
+                assert_eq!(session.base(), bytes);
+            } else {
+                assert!(
+                    reference < ink.unwrap(),
+                    "foreign ink stays in the immutable preview"
+                );
+                assert!(session.edit_data.is_none());
+            }
             session.set_reference_lines(ReferenceLines {
                 pattern: ReferencePattern::None,
                 ..lines

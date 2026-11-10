@@ -27,6 +27,9 @@ pub(super) enum ToolbarAction {
     Undo,
     Redo,
     Tool(CanvasTool),
+    DeleteSelected,
+    ClearSelection,
+    SelectPage,
     MousePen,
     Smoothing,
     DismissNotice,
@@ -51,6 +54,7 @@ pub(super) struct DocumentActions {
     pub mouse_pen: bool,
     pub smoothing: bool,
     pub recovery_count: usize,
+    pub selected_count: usize,
 }
 
 pub(super) struct ToolbarContext<'a> {
@@ -157,7 +161,17 @@ impl WorkspaceToolbar {
 fn shortcuts(ui: &egui::Ui, document: &DocumentActions, zoom: f64) -> Option<ToolbarAction> {
     let editing_text = ui.ctx().text_edit_focused();
     ui.input(|input| {
-        if !editing_text
+        if !editing_text && document.selected_count > 0 && input.key_pressed(egui::Key::Delete) {
+            Some(ToolbarAction::DeleteSelected)
+        } else if !editing_text && input.key_pressed(egui::Key::Escape) {
+            Some(ToolbarAction::ClearSelection)
+        } else if !editing_text
+            && document.tool == CanvasTool::Select
+            && input.modifiers.ctrl
+            && input.key_pressed(egui::Key::A)
+        {
+            Some(ToolbarAction::SelectPage)
+        } else if !editing_text
             && input.modifiers.ctrl
             && !input.modifiers.alt
             && ((input.modifiers.shift && input.key_pressed(egui::Key::Z))
@@ -183,9 +197,7 @@ fn shortcuts(ui: &egui::Ui, document: &DocumentActions, zoom: f64) -> Option<Too
             Some(ToolbarAction::Open)
         } else if document.can_close && input.modifiers.ctrl && input.key_pressed(egui::Key::W) {
             Some(ToolbarAction::Close)
-        } else if !editing_text
-            && let Some(factor) = keyboard_zoom::factor(&input.events, zoom)
-        {
+        } else if !editing_text && let Some(factor) = keyboard_zoom::factor(&input.events, zoom) {
             Some(ToolbarAction::View(ViewAction::Zoom(factor)))
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::Num0) {
             Some(ToolbarAction::View(ViewAction::Fit))

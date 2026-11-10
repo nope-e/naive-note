@@ -5,7 +5,7 @@ use skia_safe::{
 };
 
 use super::{PageScene, draft_paper};
-use crate::document::{CanvasViewport, PathCommand, PenStyle, Point, StrokeRecord};
+use crate::document::{CanvasViewport, InkKind, PathCommand, PenStyle, Point, StrokeRecord};
 
 pub(super) fn draw(
     canvas: &Canvas,
@@ -114,8 +114,52 @@ pub(super) fn draw(
         draw_stroke(canvas, stroke);
     }
     if let Some(active) = &scene.active_stroke {
-        draw_stroke(canvas, &active.record);
-        draw_outline(canvas, &active.predicted_outline, &active.record.style);
+        // Fill confirmed ink and prediction together: translucent overlaps must
+        // not darken the join within one highlighter object.
+        draw_outline(
+            canvas,
+            active
+                .record
+                .outline
+                .iter()
+                .chain(active.predicted_outline.iter()),
+            &active.record.style,
+        );
+    }
+    let mut selection = Paint::default();
+    selection
+        .set_anti_alias(true)
+        .set_style(Style::Stroke)
+        .set_stroke_width(1.5 / scale)
+        .set_color(Color::from_rgb(75, 165, 255));
+    for bounds in &scene.selected_bounds {
+        let mut rect = SkRect::new(
+            bounds.min.x as f32,
+            bounds.min.y as f32,
+            bounds.max.x as f32,
+            bounds.max.y as f32,
+        );
+        rect.outset((3.0 / scale, 3.0 / scale));
+        canvas.draw_rect(rect, &selection);
+    }
+    if let Some(bounds) = scene.selection_rect {
+        let rect = SkRect::new(
+            bounds.min.x as f32,
+            bounds.min.y as f32,
+            bounds.max.x as f32,
+            bounds.max.y as f32,
+        );
+        canvas.draw_rect(rect, &selection);
+        selection.set_style(Style::Fill).set_alpha(28);
+        canvas.draw_rect(rect, &selection);
+    }
+    if let Some((position, radius)) = scene.eraser_cursor {
+        selection.set_style(Style::Stroke).set_alpha(255);
+        canvas.draw_circle(
+            (position.x as f32, position.y as f32),
+            radius as f32,
+            &selection,
+        );
     }
     canvas.restore();
 
@@ -134,10 +178,14 @@ pub(super) fn draw(
 }
 
 fn draw_stroke(canvas: &Canvas, stroke: &StrokeRecord) {
-    draw_outline(canvas, &stroke.outline, &stroke.style);
+    draw_outline(canvas, stroke.outline.iter(), &stroke.style);
 }
 
-fn draw_outline(canvas: &Canvas, outline: &[PathCommand], style: &PenStyle) {
+fn draw_outline<'a>(
+    canvas: &Canvas,
+    outline: impl IntoIterator<Item = &'a PathCommand>,
+    style: &PenStyle,
+) {
     let mut builder = skia_safe::PathBuilder::new();
     let point = |p: Point| skia_safe::Point::new(p.x as f32, p.y as f32);
     for command in outline {
@@ -165,5 +213,10 @@ fn draw_outline(canvas: &Canvas, outline: &[PathCommand], style: &PenStyle) {
     paint
         .set_anti_alias(true)
         .set_color(Color::from_rgb(r, g, b));
+    if style.kind == InkKind::Highlighter {
+        paint
+            .set_alpha(102)
+            .set_blend_mode(skia_safe::BlendMode::Multiply);
+    }
     canvas.draw_path(&builder.detach(), &paint);
 }

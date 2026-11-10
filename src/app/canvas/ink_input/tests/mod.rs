@@ -1,6 +1,7 @@
 mod modeling;
 mod mouse;
 mod navigation;
+mod objects;
 mod ownership;
 mod samples;
 mod selected_tool;

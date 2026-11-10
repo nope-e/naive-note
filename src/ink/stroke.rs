@@ -10,7 +10,11 @@ use crate::document::{
     RawSample, StrokeRecord,
 };
 
-use super::{modeler::InkModeler, outline::append_outline, target::StrokeTarget};
+use super::{
+    modeler::InkModeler,
+    outline::{OutlineState, append_outline},
+    target::StrokeTarget,
+};
 
 /// Predictions deliberately have no serialization or document-storage path.
 #[derive(Clone)]
@@ -24,6 +28,7 @@ pub struct LiveStroke {
     record: Arc<StrokeRecord>,
     modeler: Option<InkModeler>,
     predicted_outline: Arc<[PathCommand]>,
+    outline_state: OutlineState,
 }
 
 impl LiveStroke {
@@ -36,6 +41,7 @@ impl LiveStroke {
             target,
             modeler,
             predicted_outline: Arc::from([]),
+            outline_state: OutlineState::default(),
             record: Arc::new(StrokeRecord {
                 id: Uuid::new_v4(),
                 page_index: target.page_index,
@@ -106,13 +112,21 @@ impl LiveStroke {
         if let Some(modeler) = self.modeler.as_mut() {
             match modeler.push(&raw) {
                 Ok(samples) => {
-                    append_samples(Arc::make_mut(&mut self.record), samples);
+                    append_samples(
+                        Arc::make_mut(&mut self.record),
+                        &mut self.outline_state,
+                        samples,
+                    );
                     self.refresh_prediction();
                 }
                 Err(error) => self.fallback(&error),
             }
         } else {
-            append_samples(Arc::make_mut(&mut self.record), [direct_sample(&raw)]);
+            append_samples(
+                Arc::make_mut(&mut self.record),
+                &mut self.outline_state,
+                [direct_sample(&raw)],
+            );
         }
     }
 
@@ -124,7 +138,7 @@ impl LiveStroke {
         match modeler.predict() {
             Ok(samples) => {
                 let mut path = Vec::new();
-                let mut previous = self.record.modeled_samples.last();
+                let mut previous = self.outline_state.anchor();
                 for sample in &samples {
                     append_outline(&mut path, previous, sample, &self.record.style);
                     previous = Some(sample);
@@ -142,7 +156,12 @@ impl LiveStroke {
         let record = Arc::make_mut(&mut self.record);
         record.processing = direct_processing();
         record.modeled_samples = record.raw_samples.iter().map(direct_sample).collect();
-        record.outline = super::round_outline(&record.modeled_samples, &record.style);
+        record.outline.clear();
+        self.outline_state = OutlineState::default();
+        for sample in &record.modeled_samples {
+            self.outline_state
+                .append(&mut record.outline, sample, &record.style, false);
+        }
     }
 
     pub fn snapshot(&self) -> ActiveInk {
@@ -157,9 +176,21 @@ impl LiveStroke {
         // at the last ink sample. This synthetic Up never changes the raw log.
         if let Some(modeler) = self.modeler.as_mut() {
             match modeler.finish() {
-                Ok(samples) => append_samples(Arc::make_mut(&mut self.record), samples),
+                Ok(samples) => append_samples(
+                    Arc::make_mut(&mut self.record),
+                    &mut self.outline_state,
+                    samples,
+                ),
                 Err(error) => self.fallback(&error),
             }
+        }
+        let record = Arc::make_mut(&mut self.record);
+        if record.style.kind == crate::document::InkKind::Highlighter
+            && let Some(last) = record.modeled_samples.last()
+        {
+            // Coalescing may skip a tiny last Move, but not the final endpoint.
+            self.outline_state
+                .append(&mut record.outline, last, &record.style, true);
         }
         (!self.record.raw_samples.is_empty()).then_some(self.record)
     }
@@ -182,14 +213,13 @@ fn direct_sample(raw: &RawSample) -> ModeledSample {
     }
 }
 
-fn append_samples(record: &mut StrokeRecord, samples: impl IntoIterator<Item = ModeledSample>) {
+fn append_samples(
+    record: &mut StrokeRecord,
+    state: &mut OutlineState,
+    samples: impl IntoIterator<Item = ModeledSample>,
+) {
     for sample in samples {
-        append_outline(
-            &mut record.outline,
-            record.modeled_samples.last(),
-            &sample,
-            &record.style,
-        );
+        state.append(&mut record.outline, &sample, &record.style, false);
         record.modeled_samples.push(sample);
     }
 }

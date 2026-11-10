@@ -4,6 +4,7 @@ mod area;
 mod document;
 mod ink_input;
 mod new_document;
+mod object_editing;
 mod pdf_preview;
 mod persistence;
 mod scrollbars;
@@ -36,6 +37,7 @@ pub(super) struct CanvasWorkspace {
     area: CanvasArea,
     document: CanvasDocument,
     input: CanvasInput,
+    objects: object_editing::ObjectEditing,
     toolbar: WorkspaceToolbar,
     has_document: bool,
     new_document: NewDocumentDialog,
@@ -64,6 +66,7 @@ impl CanvasWorkspace {
             area: CanvasArea::default(),
             document,
             input: CanvasInput::for_editor(),
+            objects: object_editing::ObjectEditing::default(),
             toolbar: WorkspaceToolbar::default(),
             has_document: false,
             new_document: NewDocumentDialog::default(),
@@ -136,6 +139,7 @@ impl CanvasWorkspace {
         let was_saving = self.document.is_saving();
         let saved_ok = matches!(&response, PdfResponse::Saved(response) if response.result.is_ok());
         if let Some(page) = self.document.receive(response) {
+            self.objects.clear();
             self.persistence
                 .drafts
                 .retain(|draft| Some(&draft.path) != opened_path.as_ref());
@@ -165,6 +169,7 @@ impl CanvasWorkspace {
         if let Some(stroke) = self.input.finish_for_save() {
             self.document.add_stroke(stroke);
         }
+        self.flush_object_events();
         if !save_as && let Some(path) = self.document.save_path() {
             let path = path.to_owned();
             self.document.save(path, self.view.draft_page());
@@ -199,6 +204,8 @@ impl CanvasWorkspace {
 
     fn close_pdf(&mut self) {
         self.input.cancel_drawing();
+        self.flush_object_events();
+        self.objects.clear();
         self.document.close();
         self.view = CanvasView::draft();
         self.area = CanvasArea::default();
@@ -215,6 +222,12 @@ impl CanvasWorkspace {
 
     pub fn cancel_input(&mut self) {
         self.input.cancel();
+        self.flush_object_events();
+    }
+
+    fn flush_object_events(&mut self) {
+        self.objects
+            .receive(self.input.take_object_events(), &mut self.document);
     }
 
     pub fn pen_sample(&mut self, event: crate::platform::PenEvent, over_ui: bool) -> bool {
@@ -227,6 +240,7 @@ impl CanvasWorkspace {
         if let Some(stroke) = stroke {
             self.document.add_stroke(stroke);
         }
+        self.flush_object_events();
         ui_owned
     }
 
@@ -246,6 +260,7 @@ impl CanvasWorkspace {
         if let Some(stroke) = stroke {
             self.document.add_stroke(stroke);
         }
+        self.flush_object_events();
         owned
     }
 
@@ -253,12 +268,14 @@ impl CanvasWorkspace {
         if let Some(stroke) = self.input.mouse_move(position, &mut self.view, modifiers) {
             self.document.add_stroke(stroke);
         }
+        self.flush_object_events();
     }
 
     pub fn modifiers_changed(&mut self, modifiers: egui::Modifiers) {
         if let Some(stroke) = self.input.modifiers_changed(modifiers, &mut self.view) {
             self.document.add_stroke(stroke);
         }
+        self.flush_object_events();
     }
 
     pub fn show(
@@ -269,6 +286,8 @@ impl CanvasWorkspace {
         framebuffer: (u32, u32),
         process_input: bool,
     ) -> Option<CanvasScene> {
+        self.flush_object_events();
+        self.objects.prune(&self.document);
         let before = (
             self.view.transform,
             self.view.current_page(),
@@ -296,7 +315,7 @@ impl CanvasWorkspace {
                 notice: self.document.notice(),
                 zoom: self.view.transform.zoom(),
                 bottom_inset: if show_renderer_info { 140.0 } else { 0.0 },
-                style: &self.input.style,
+                style: self.input.current_style(),
                 document: toolbar::DocumentActions {
                     can_close: self.has_document || self.document.can_close(),
                     can_save: self.has_document
@@ -310,6 +329,7 @@ impl CanvasWorkspace {
                     mouse_pen: self.input.mouse_pen,
                     smoothing: self.input.smoothing,
                     recovery_count: self.persistence.drafts.len(),
+                    selected_count: self.objects.selected_count(),
                 },
                 settings: &self.persistence.settings,
                 reference_layer: self.document.reference_layer(),
@@ -340,6 +360,7 @@ impl CanvasWorkspace {
                 )
             {
                 self.input.cancel_drawing();
+                self.flush_object_events();
             }
             match action {
                 Some(ToolbarAction::New) => {
@@ -382,6 +403,20 @@ impl CanvasWorkspace {
                 }
                 Some(ToolbarAction::Tool(tool)) => {
                     self.input.tool = tool;
+                    self.objects.clear();
+                    action = None;
+                }
+                Some(ToolbarAction::DeleteSelected) => {
+                    self.objects.delete_selected(&mut self.document);
+                    action = None;
+                }
+                Some(ToolbarAction::ClearSelection) => {
+                    self.objects.clear();
+                    action = None;
+                }
+                Some(ToolbarAction::SelectPage) => {
+                    self.objects
+                        .select_page(&self.document, self.view.current_page());
                     action = None;
                 }
                 Some(ToolbarAction::MousePen) => {
@@ -395,17 +430,17 @@ impl CanvasWorkspace {
                     action = None;
                 }
                 Some(ToolbarAction::Color(color)) => {
-                    self.input.style.color_rgb = color;
+                    self.input.current_style_mut().color_rgb = color;
                     self.persist_settings();
                     action = None;
                 }
                 Some(ToolbarAction::Width(width)) => {
-                    self.input.style.max_width_pt = width;
+                    self.input.current_style_mut().max_width_pt = width;
                     self.persist_settings();
                     action = None;
                 }
                 Some(ToolbarAction::PressureGamma(gamma)) => {
-                    self.input.style.pressure_gamma = gamma;
+                    self.input.current_style_mut().pressure_gamma = gamma;
                     self.persist_settings();
                     action = None;
                 }
@@ -468,6 +503,8 @@ impl CanvasWorkspace {
                     };
                     self.document
                         .update_scene(ui.ctx(), &mut scene, self.view.current_page());
+                    self.objects.prune(&self.document);
+                    self.objects.decorate(&mut scene);
                     if let Some(stroke) = self.input.active()
                         && let Some(page) = scene
                             .pages

@@ -26,6 +26,9 @@ pub struct Settings {
     pub smoothing: bool,
     pub mouse_pen: bool,
     pub reference_lines: ReferenceLines,
+    pub highlighter_color: [u8; 3],
+    pub highlighter_width: f64,
+    pub highlighter_pressure_gamma: f64,
 }
 
 impl Default for Settings {
@@ -39,6 +42,9 @@ impl Default for Settings {
             smoothing: true,
             mouse_pen: true,
             reference_lines: ReferenceLines::default(),
+            highlighter_color: PenStyle::highlighter().color_rgb,
+            highlighter_width: PenStyle::highlighter().max_width_pt,
+            highlighter_pressure_gamma: PenStyle::highlighter().pressure_gamma,
         }
     }
 }
@@ -46,6 +52,15 @@ impl Default for Settings {
 impl Settings {
     fn validate(&self) -> Result<()> {
         self.reference_lines.validate()?;
+        ensure!(
+            self.highlighter_pressure_gamma.is_finite()
+                && (0.0..=10.0).contains(&self.highlighter_pressure_gamma),
+            "无效的荧光笔压力曲线"
+        );
+        ensure!(
+            self.highlighter_width.is_finite() && (0.1..=100.0).contains(&self.highlighter_width),
+            "无效的荧光笔笔宽"
+        );
         ensure!(self.version == 1, "不支持的设置版本 {}", self.version);
         ensure!(
             (5..=15).contains(&self.autosave_seconds),

@@ -5,6 +5,7 @@ mod outline;
 mod stroke;
 mod target;
 
+#[cfg(test)]
 use outline::round_outline;
 pub use stroke::{ActiveInk, LiveStroke};
 pub use target::StrokeTarget;

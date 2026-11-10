@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn old_pen_style_decodes_as_opaque_pen_and_highlighter_uses_pressure() {
+    let old =
+        r#"{"color_rgb":[1,2,3],"max_width_pt":4.0,"min_width_ratio":0.2,"pressure_gamma":1.0}"#;
+    let style: PenStyle = serde_json::from_str(old).unwrap();
+    assert_eq!(style.kind, InkKind::Pen);
+    let style = PenStyle::highlighter();
+    for (pressure, width) in [(0., 3.2), (0.25, 6.4), (0.5, 9.6), (1., 16.)] {
+        assert!((style.width(pressure) - width).abs() < 1e-9);
+    }
+}
+
+#[test]
 fn old_processing_snapshots_decode_without_modeler_parameters() {
     #[derive(serde::Serialize)]
     struct LegacyProcessing {

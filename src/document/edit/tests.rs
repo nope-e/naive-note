@@ -1,5 +1,30 @@
 use super::*;
 
+#[test]
+fn saved_objects_batch_delete_restores_original_order_and_clean_checkpoint() {
+    let objects = [stroke(0), stroke(0), stroke(0), stroke(1), stroke(1)];
+    let mut history = EditHistory::from_strokes(objects.iter().cloned());
+    assert!(!history.can_undo() && !history.revision().is_dirty());
+    let ids = HashSet::from([objects[0].id, objects[2].id, objects[3].id]);
+    assert!(history.remove_strokes(&ids));
+    let revision = history.revision();
+    assert!(!history.remove_strokes(&ids));
+    assert_eq!(history.revision(), revision);
+    assert_eq!(history.strokes(0)[0].id, objects[1].id);
+    assert!(history.undo());
+    assert!(!history.revision().is_dirty());
+    for (restored, original) in history.snapshot().iter().zip(objects.iter()) {
+        assert!(Arc::ptr_eq(restored, original));
+    }
+    assert!(history.redo());
+    history.mark_saved(revision.current);
+    assert!(!history.revision().is_dirty());
+    assert!(history.undo());
+    assert!(history.revision().is_dirty());
+    history.execute(EditCommand::AddStroke(stroke(0)));
+    assert!(!history.can_redo());
+}
+
 fn stroke(page: u32) -> Arc<StrokeRecord> {
     use crate::document::{PageGeometry, Rect, Rotation};
     let geometry = PageGeometry::new(Rect::new(0.0, 0.0, 600.0, 800.0), Rotation::R0, 1.0).unwrap();

@@ -1,16 +1,66 @@
 use crate::document::{ModeledSample, PathCommand, PenStyle, Point};
 
+/// Highlighters are wide enough that a stationary modeler can otherwise put
+/// hundreds of coincident contours into one fill. Preserve every modeled/raw
+/// sample, but coalesce its redundant geometry around the last emitted disk.
+#[derive(Default)]
+pub(super) struct OutlineState {
+    anchor: Option<ModeledSample>,
+    disk_start: usize,
+}
+
+impl OutlineState {
+    pub fn anchor(&self) -> Option<&ModeledSample> {
+        self.anchor.as_ref()
+    }
+
+    pub fn append(
+        &mut self,
+        path: &mut Vec<PathCommand>,
+        sample: &ModeledSample,
+        style: &PenStyle,
+        endpoint: bool,
+    ) {
+        if style.kind == crate::document::InkKind::Highlighter
+            && let Some(anchor) = &self.anchor
+        {
+            let distance = (sample.position.x - anchor.position.x)
+                .hypot(sample.position.y - anchor.position.y);
+            let old_radius = style.width(anchor.pressure) * 0.5;
+            let radius = style.width(sample.pressure) * 0.5;
+            if distance + radius <= old_radius + 1e-9 {
+                return;
+            }
+            if distance + old_radius <= radius + 1e-9 {
+                // The new disk covers the preceding disk, including its joins.
+                // Replace it rather than accumulating concentric contours.
+                path.truncate(self.disk_start);
+                append_outline(path, None, sample, style);
+                self.anchor = Some(sample.clone());
+                return;
+            }
+            // Bound overlapping contours from subpixel modeler settling. The
+            // next emitted segment still joins the last emitted anchor, and Up
+            // always includes the actual endpoint. Width changes stay visible.
+            let tolerance = old_radius.max(radius) * 0.05;
+            if !endpoint && distance < tolerance && (radius - old_radius).abs() < tolerance {
+                return;
+            }
+        }
+        append_outline(path, self.anchor.as_ref(), sample, style);
+        self.disk_start = path.len() - 6;
+        self.anchor = Some(sample.clone());
+    }
+}
+
 // Round disks and connecting trapezoids use the same winding. Nonzero filling
 // combines them without seams and handles coincident samples without division.
+#[cfg(test)]
 pub(super) fn round_outline(samples: &[ModeledSample], style: &PenStyle) -> Vec<PathCommand> {
     let mut path = Vec::new();
-    for (i, sample) in samples.iter().enumerate() {
-        append_outline(
-            &mut path,
-            i.checked_sub(1).map(|i| &samples[i]),
-            sample,
-            style,
-        );
+    let mut state = OutlineState::default();
+    for (index, sample) in samples.iter().enumerate() {
+        state.append(&mut path, sample, style, index + 1 == samples.len());
     }
     path
 }

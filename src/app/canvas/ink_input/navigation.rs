@@ -41,6 +41,7 @@ impl CanvasInput {
             && let Some(position) = self.last_position
             && self.update_navigation(position, view, modifiers)
         {
+            self.cancel_object();
             return self.finish_stroke();
         }
         None

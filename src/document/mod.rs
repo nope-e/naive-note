@@ -3,6 +3,7 @@
 mod edit;
 mod geometry;
 mod layout;
+mod object_geometry;
 mod reference_lines;
 mod stroke;
 mod view;
@@ -12,7 +13,7 @@ pub use geometry::{PageGeometry, Point, Rect, Rotation, Size};
 pub use layout::PageLayout;
 pub use reference_lines::{ReferenceLayer, ReferenceLines, ReferenceMark, ReferencePattern};
 pub use stroke::{
-    ModeledSample, ModelerPreset, NativePenData, PathCommand, PenPhase, PenStyle,
+    InkKind, ModeledSample, ModelerPreset, NativePenData, PathCommand, PenPhase, PenStyle,
     ProcessingSnapshot, RawSample, StrokeRecord,
 };
 pub use view::{CanvasViewport, MAX_ZOOM, MIN_ZOOM, ViewTransform};

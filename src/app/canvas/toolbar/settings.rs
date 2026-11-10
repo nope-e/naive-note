@@ -71,7 +71,12 @@ fn show(ui: &mut egui::Ui, state: &ToolbarContext<'_>, action: &mut Option<Toolb
             {
                 *action = Some(ToolbarAction::Smoothing);
             }
-            widgets::section(ui, "硬笔样式");
+            if state.document.tool == super::CanvasTool::Highlighter {
+                widgets::section(ui, "荧光笔样式");
+                ui.label("压感笔宽 · 40% 不透明度 · 正片叠底");
+            } else {
+                widgets::section(ui, "硬笔样式");
+            }
             pressure_curve(ui, state.style.pressure_gamma, action);
             widgets::section(ui, "输入");
             if widgets::switch(

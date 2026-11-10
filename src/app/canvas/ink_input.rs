@@ -2,6 +2,7 @@
 
 mod mouse;
 mod navigation;
+mod objects;
 mod pen;
 #[cfg(test)]
 mod tests;
@@ -15,11 +16,15 @@ use crate::{
 
 use super::view::CanvasView;
 use navigation::Navigation;
+pub(super) use objects::{ObjectEvent, ObjectGesture};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum CanvasTool {
     #[default]
     Pen,
+    Highlighter,
+    Eraser,
+    Select,
     Pan,
 }
 
@@ -29,11 +34,14 @@ pub(super) struct CanvasInput {
     contact: Option<(u32, u64, bool)>,
     mouse_active: bool,
     navigation: Option<Navigation>,
+    object: Option<ObjectGesture>,
+    object_events: Vec<ObjectEvent>,
     last_position: Option<Point>,
     pub tool: CanvasTool,
     pub mouse_pen: bool,
     pub smoothing: bool,
     pub style: PenStyle,
+    pub highlighter_style: PenStyle,
     // Only consulted on Down; UI/canvas ownership then remains fixed until Up.
     pub ui_blocked: bool,
     clock: Instant,
@@ -46,11 +54,14 @@ impl Default for CanvasInput {
             contact: None,
             mouse_active: false,
             navigation: None,
+            object: None,
+            object_events: Vec::new(),
             last_position: None,
             tool: CanvasTool::default(),
             mouse_pen: false,
             smoothing: true,
             style: PenStyle::default(),
+            highlighter_style: PenStyle::highlighter(),
             ui_blocked: false,
             clock: Instant::now(),
         }
@@ -58,6 +69,22 @@ impl Default for CanvasInput {
 }
 
 impl CanvasInput {
+    pub fn current_style(&self) -> &PenStyle {
+        if self.tool == CanvasTool::Highlighter {
+            &self.highlighter_style
+        } else {
+            &self.style
+        }
+    }
+
+    pub fn current_style_mut(&mut self) -> &mut PenStyle {
+        if self.tool == CanvasTool::Highlighter {
+            &mut self.highlighter_style
+        } else {
+            &mut self.style
+        }
+    }
+
     pub fn for_editor() -> Self {
         Self {
             mouse_pen: true,
@@ -81,7 +108,7 @@ impl CanvasInput {
     }
 
     pub fn is_drawing(&self) -> bool {
-        self.active.is_some()
+        self.active.is_some() || self.object.is_some()
     }
 
     pub fn active(&self) -> Option<ActiveInk> {
@@ -89,6 +116,7 @@ impl CanvasInput {
     }
 
     pub fn cancel(&mut self) {
+        self.cancel_object();
         self.active = None;
         self.contact = None;
         self.mouse_active = false;
@@ -104,6 +132,7 @@ impl CanvasInput {
 
     /// UI drags must retain ownership until Up, even when they change the view.
     pub fn cancel_drawing(&mut self) {
+        self.cancel_object();
         self.active = None;
         self.mouse_active = false;
         self.navigation = None;

@@ -11,7 +11,7 @@ use mupdf::{
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::document::{PageGeometry, PathCommand, Point, ReferenceLayer, StrokeRecord};
+use crate::document::{InkKind, PageGeometry, PathCommand, Point, ReferenceLayer, StrokeRecord};
 
 use super::{
     backend::page_geometry,
@@ -102,7 +102,17 @@ fn add_stroke(document: &mut PdfDocument, stroke: &StrokeRecord) -> Result<Saved
     form.dict_put("FormType", PdfObject::new_int(1)?)?;
     form.dict_put("BBox", numbers(document, &rect)?)?;
     form.dict_put("Matrix", numbers(document, &[1., 0., 0., 1., 0., 0.])?)?;
-    form.dict_put("Resources", document.new_dict()?)?;
+    let mut resources = document.new_dict()?;
+    if stroke.style.kind == InkKind::Highlighter {
+        let mut state = document.new_dict()?;
+        state.dict_put("Type", PdfObject::new_name("ExtGState")?)?;
+        state.dict_put("ca", PdfObject::new_real(0.4)?)?;
+        state.dict_put("BM", PdfObject::new_name("Multiply")?)?;
+        let mut states = document.new_dict()?;
+        states.dict_put("NNHighlight", state)?;
+        resources.dict_put("ExtGState", states)?;
+    }
+    form.dict_put("Resources", resources)?;
     let stream = document.add_stream(
         &Buffer::from_bytes(contents.as_bytes())?,
         Some(&form),
@@ -123,8 +133,8 @@ fn add_stroke(document: &mut PdfDocument, stroke: &StrokeRecord) -> Result<Saved
     })
 }
 
-/// Serialize only the current session strokes over the original immutable PDF.
-/// Invalid private metadata is replaced; all actual PDF annotations are retained.
+/// Replace verified native ink with the complete editable snapshot. Annotations
+/// without trusted metadata remain part of the immutable source.
 pub(super) fn serialize_with_reference(
     base: &[u8],
     strokes: &[std::sync::Arc<StrokeRecord>],
@@ -133,18 +143,19 @@ pub(super) fn serialize_with_reference(
 ) -> Result<(Vec<u8>, EditData)> {
     let mut document = PdfDocument::from_bytes(base)?;
     ensure_writable(&document)?;
-    let mut data = read_edit_data(&document)
-        .unwrap_or_else(|error| {
-            log::warn!("Replacing ignored edit metadata during save: {error:#}");
-            None
-        })
-        .unwrap_or(EditData {
-            format_version: FORMAT_VERSION,
-            document_id,
-            strokes: Vec::new(),
-            reference_lines: None,
-        });
-    data.reference_lines = Some(reference_lines);
+    let previous = read_edit_data(&document).unwrap_or_else(|error| {
+        log::warn!("Replacing ignored edit metadata during save: {error:#}");
+        None
+    });
+    if let Some(data) = &previous {
+        remove_editable_ink(&document, data)?;
+    }
+    let mut data = EditData {
+        format_version: FORMAT_VERSION,
+        document_id: previous.map_or(document_id, |data| data.document_id),
+        strokes: Vec::new(),
+        reference_lines: Some(reference_lines),
+    };
     super::reference_lines::write(&mut document, reference_lines)?;
     let mut ids: HashSet<_> = data.strokes.iter().map(|s| s.stroke.id).collect();
     // Also reserve UUIDs of standard annotations whose metadata was discarded.
@@ -203,6 +214,30 @@ pub(super) fn serialize_with_reference(
     }
     verify_data(&bytes, &data)?;
     Ok((bytes, data))
+}
+
+/// Caller must supply metadata verified against this document before mutation.
+pub(super) fn remove_editable_ink(document: &PdfDocument, data: &EditData) -> Result<()> {
+    let ids: HashSet<_> = data
+        .strokes
+        .iter()
+        .map(|s| s.stroke.id.to_string())
+        .collect();
+    for index in 0..document.page_count()? {
+        let mut page = document.load_pdf_page(index)?;
+        let mut removed = Vec::new();
+        for annotation in page.annotations() {
+            if let Some(name) = annotation.object().get_dict("NM")?
+                && ids.contains(&name.as_string()?)
+            {
+                removed.push(annotation);
+            }
+        }
+        for annotation in removed {
+            page.delete_annotation(annotation)?;
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn verify_data(bytes: &[u8], expected: &EditData) -> Result<()> {
@@ -413,7 +448,7 @@ fn validate_stroke(stroke: &StrokeRecord, geometry: PageGeometry) -> Result<()> 
             && style.max_width_pt < 1000.0
             && (0.0..=1.0).contains(&style.min_width_ratio)
             && style.pressure_gamma.is_finite()
-            && style.pressure_gamma > 0.0,
+            && style.pressure_gamma >= 0.0,
         "Invalid pen style"
     );
     ensure!(
@@ -456,6 +491,9 @@ fn appearance(stroke: &StrokeRecord, geometry: PageGeometry) -> Result<([f64; 4]
         f64::NEG_INFINITY,
     ];
     let mut path = String::from("q\n");
+    if stroke.style.kind == InkKind::Highlighter {
+        path.push_str("/NNHighlight gs\n");
+    }
     let [r, g, b] = stroke.style.color_rgb.map(|c| f64::from(c) / 255.0);
     writeln!(path, "{r:.8} {g:.8} {b:.8} rg")?;
     let mut point = |p: Point| -> Result<Point> {
@@ -540,6 +578,17 @@ fn verify_geometry(
     }
     let (rect, contents) = appearance(stroke, geometry)?;
     let ap = normal_appearance(object)?;
+    if stroke.style.kind == InkKind::Highlighter {
+        let state = required(
+            &required(&required(&ap, "Resources")?, "ExtGState")?,
+            "NNHighlight",
+        )?;
+        ensure!(
+            is_name(state.get_dict("BM")?, b"Multiply")?
+                && (required(&state, "ca")?.as_float()? - 0.4).abs() < 1e-6,
+            "Highlighter blending changed"
+        );
+    }
     ensure!(
         ap.read_stream()? == contents.as_bytes(),
         "Pressure appearance was replaced"
@@ -586,6 +635,20 @@ fn fingerprint(object: &PdfObject) -> Result<String> {
         ),
         &mut bytes,
     )?;
+    // Preserve the version-1 pen fingerprint byte-for-byte. New highlighter
+    // resources also participate in integrity checks.
+    if let Some(resources) = ap.get_dict("Resources")?
+        && let Some(states) = resources.get_dict("ExtGState")?
+        && let Some(state) = states.get_dict("NNHighlight")?
+    {
+        ciborium::into_writer(
+            &(
+                required(&state, "BM")?.as_name()?,
+                required(&state, "ca")?.as_float()?,
+            ),
+            &mut bytes,
+        )?;
+    }
     Ok(Sha256::digest(bytes)
         .iter()
         .map(|b| format!("{b:02x}"))

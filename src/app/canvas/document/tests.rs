@@ -27,6 +27,7 @@ fn fixture_pdf() -> LoadedPdf {
             ..ReferenceLines::default()
         },
         edit_data_status: "Existing annotations in immutable base".to_owned(),
+        strokes: Vec::new(),
         fingerprint: crate::storage::FileFingerprint::of(b"fixture"),
     }
 }
@@ -106,6 +107,30 @@ fn successful_open_and_close_start_fresh_histories_over_the_base() {
             })
             .is_none()
     );
+}
+
+#[test]
+fn opened_verified_ink_is_editable_clean_and_its_first_removal_is_undoable() {
+    let mut document = document();
+    let mut pdf = fixture_pdf();
+    let stroke = Arc::new(crate::ink::test_support::pressure_stroke(pdf.pages[0]).unwrap());
+    pdf.strokes.push(stroke.clone());
+    document.pending = Some(1);
+    assert!(
+        document
+            .opened(OpenResponse {
+                request: 1,
+                result: Ok(pdf)
+            })
+            .is_some()
+    );
+    assert!(!document.is_dirty() && !document.can_undo());
+    assert_eq!(document.strokes(0).len(), 1);
+    document.remove_strokes(&std::collections::HashSet::from([stroke.id]));
+    assert!(document.is_dirty() && document.strokes(0).is_empty());
+    document.undo();
+    assert!(!document.is_dirty());
+    assert!(Arc::ptr_eq(&document.strokes(0)[0], &stroke));
 }
 
 #[test]

@@ -125,7 +125,7 @@ impl CanvasDocument {
                 let recovering = self.saving.recovering.take();
                 self.discard_recovery_except(recovering.as_deref());
                 self.saving.reset();
-                self.edits = EditHistory::default();
+                self.edits = EditHistory::from_strokes(pdf.strokes.iter().cloned());
                 self.reference_metadata = pdf.reference_lines;
                 self.pending_save = None;
                 self.saved_target = if recovering.is_some() {
@@ -225,6 +225,20 @@ impl CanvasDocument {
         }
     }
 
+    pub fn strokes(&self, page: u32) -> &[Arc<StrokeRecord>] {
+        self.edits.strokes(page)
+    }
+
+    pub fn contains_stroke(&self, id: uuid::Uuid) -> bool {
+        self.edits.contains_stroke(id)
+    }
+
+    pub fn remove_strokes(&mut self, ids: &std::collections::HashSet<uuid::Uuid>) {
+        if self.can_ink() && self.edits.remove_strokes(ids) {
+            self.edit_changed();
+        }
+    }
+
     pub fn can_undo(&self) -> bool {
         self.can_ink() && self.edits.can_undo()
     }
@@ -255,7 +269,7 @@ impl CanvasDocument {
         self.is_dirty() && self.pending.is_none()
     }
 
-    fn revision(&self) -> DocumentRevision {
+    pub(super) fn revision(&self) -> DocumentRevision {
         self.edits.revision()
     }
 

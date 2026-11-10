@@ -134,7 +134,11 @@ impl WorkspaceToolbar {
                     icons::paint(
                         ui,
                         egui::Rect::from_center_size(rect.center(), vec2(24.0, 24.0)),
-                        Icon::Pen,
+                        if state.document.tool == CanvasTool::Highlighter {
+                            Icon::Marker
+                        } else {
+                            Icon::Pen
+                        },
                         theme::TEXT,
                     );
                     super::settings::button(ui, state, action);
@@ -173,7 +177,12 @@ impl WorkspaceToolbar {
                             }
                         });
                     ui.add_space(10.0);
-                    for (width, radius) in [(1.0, 1.5), (4.6, 3.3), (9.0, 5.3)] {
+                    let widths = if state.document.tool == CanvasTool::Highlighter {
+                        [(8.0, 2.5), (16.0, 4.5), (24.0, 6.5)]
+                    } else {
+                        [(1.0, 1.5), (4.6, 3.3), (9.0, 5.3)]
+                    };
+                    for (width, radius) in widths {
                         let (rect, response) =
                             ui.allocate_exact_size(vec2(32.0, 34.0), Sense::click());
                         let selected = (state.style.max_width_pt - width).abs() < 0.05;
@@ -215,6 +224,17 @@ impl WorkspaceToolbar {
                 ui.horizontal(|ui| {
                     for (icon, label, tool) in [
                         (Icon::Pen, "画笔", CanvasTool::Pen),
+                        (Icon::Marker, "荧光笔", CanvasTool::Highlighter),
+                        (
+                            Icon::Eraser,
+                            "对象橡皮擦 · 碰到即擦除整笔",
+                            CanvasTool::Eraser,
+                        ),
+                        (
+                            Icon::Select,
+                            "对象选择 · 点选 / 框选 · Shift 多选",
+                            CanvasTool::Select,
+                        ),
                         (Icon::Hand, "移动工具", CanvasTool::Pan),
                     ] {
                         if icons::button(ui, icon, label, state.document.tool == tool, true)
@@ -225,13 +245,28 @@ impl WorkspaceToolbar {
                         }
                     }
                     icons::separator(ui);
-                    for (icon, label) in [
-                        (Icon::Marker, "荧光笔"),
-                        (Icon::Text, "文本"),
-                        (Icon::Eraser, "橡皮擦"),
-                        (Icon::Select, "选区"),
-                    ] {
-                        icons::button(ui, icon, label, false, false);
+                    icons::button(ui, Icon::Text, "文本", false, false);
+                    if state.document.tool == CanvasTool::Select {
+                        if ui
+                            .add_enabled(state.can_edit_document, egui::Button::new("全选本页"))
+                            .on_hover_text("Ctrl+A")
+                            .clicked()
+                        {
+                            *action = Some(ToolbarAction::SelectPage);
+                        }
+                        if ui
+                            .add_enabled(
+                                state.document.selected_count > 0 && state.can_edit_document,
+                                egui::Button::new(format!(
+                                    "清除 ({})",
+                                    state.document.selected_count
+                                )),
+                            )
+                            .on_hover_text("清除所选对象 · Delete")
+                            .clicked()
+                        {
+                            *action = Some(ToolbarAction::DeleteSelected);
+                        }
                     }
                     icons::separator(ui);
                     if icons::button(

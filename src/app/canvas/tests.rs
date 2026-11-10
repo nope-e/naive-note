@@ -20,6 +20,7 @@ fn empty_workspace() -> CanvasWorkspace {
         area: CanvasArea::default(),
         document: CanvasDocument::with_worker(PdfWorker::new(|_| {}).unwrap()),
         input: CanvasInput::for_editor(),
+        objects: object_editing::ObjectEditing::default(),
         toolbar: WorkspaceToolbar::default(),
         has_document: false,
         new_document: NewDocumentDialog::default(),
@@ -29,6 +30,48 @@ fn empty_workspace() -> CanvasWorkspace {
         transition: DocumentTransition::default(),
         persistence: WorkspacePersistence::default(),
     }
+}
+
+#[test]
+fn workspace_object_input_commits_batches_and_cancels_previews_without_losing_history() {
+    use ink_input::CanvasTool;
+    let mut workspace = workspace();
+    let viewport = CanvasViewport::new(Rect::new(0., 0., 900., 700.), 1.5, (1350, 1050)).unwrap();
+    workspace.view.update_viewport(viewport);
+    let a = viewport.logical_to_physical(viewport.logical.center());
+    let b = Point::new(a.x + 90., a.y);
+    for point in [a, b] {
+        assert!(workspace.mouse_button(true, Some(point), egui::Modifiers::NONE, false));
+        assert!(workspace.mouse_button(false, Some(point), egui::Modifiers::NONE, false));
+    }
+    assert_eq!(workspace.document.strokes(0).len(), 2);
+    workspace.input.tool = CanvasTool::Select;
+    workspace.mouse_button(true, Some(a), egui::Modifiers::NONE, false);
+    workspace.mouse_button(false, Some(a), egui::Modifiers::NONE, false);
+    assert_eq!(workspace.objects.selected_count(), 1);
+    workspace.objects.delete_selected(&mut workspace.document);
+    assert_eq!(workspace.document.strokes(0).len(), 1);
+    workspace.document.undo();
+    let before = workspace.document.revision();
+    workspace.input.tool = CanvasTool::Eraser;
+    workspace.mouse_button(true, Some(a), egui::Modifiers::NONE, false);
+    workspace.mouse_move(b, egui::Modifiers::NONE);
+    assert_eq!(
+        workspace.document.strokes(0).len(),
+        2,
+        "eraser previews have not committed"
+    );
+    workspace.cancel_input();
+    assert_eq!(workspace.document.revision(), before);
+    workspace.mouse_button(true, Some(a), egui::Modifiers::NONE, false);
+    workspace.mouse_move(b, egui::Modifiers::NONE);
+    workspace.mouse_button(false, Some(b), egui::Modifiers::NONE, false);
+    assert!(workspace.document.strokes(0).is_empty());
+    workspace.document.undo();
+    assert_eq!(workspace.document.strokes(0).len(), 2);
+    assert_eq!(workspace.document.revision(), before);
+    workspace.document.redo();
+    assert!(workspace.document.strokes(0).is_empty());
 }
 
 #[test]

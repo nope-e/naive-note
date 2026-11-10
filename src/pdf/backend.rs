@@ -25,6 +25,8 @@ pub(super) struct PdfSession {
     pages: Vec<PageGeometry>,
     prepared: VecDeque<PreparedPage>,
     reference_lines: ReferenceLines,
+    edit_data: Option<super::edit_data::EditData>,
+    edit_data_status: String,
 }
 
 struct PreparedPage {
@@ -69,9 +71,10 @@ impl PdfSession {
                 .with_context(|| format!("Cannot load PDF page {}", index + 1))?;
             pages.push(page_geometry(&page)?);
         }
-        let reference_lines = super::save::read_edit_data(&document)
-            .ok()
-            .flatten()
+        let edit_data_status = super::save::edit_data_status(&document);
+        let edit_data = super::save::read_edit_data(&document).ok().flatten();
+        let reference_lines = edit_data
+            .as_ref()
             .and_then(|data| data.reference_lines)
             .map_or(
                 ReferenceLines {
@@ -80,12 +83,17 @@ impl PdfSession {
                 },
                 |layer| layer.lines,
             );
+        if let Some(data) = &edit_data {
+            super::save::remove_editable_ink(&document, data)?;
+        }
         Ok(Self {
             base: bytes.into(),
             document,
             pages,
             prepared: VecDeque::new(),
             reference_lines,
+            edit_data,
+            edit_data_status,
         })
     }
 
@@ -110,10 +118,16 @@ impl PdfSession {
             path: path.to_owned(),
             page_count: self.pages.len() as u32,
             pages: self.pages.clone(),
-            edit_data_status: super::save::edit_data_status(&self.document),
-            reference_lines: super::save::read_edit_data(&self.document)
-                .ok()
-                .flatten()
+            edit_data_status: self.edit_data_status.clone(),
+            strokes: self.edit_data.as_ref().map_or_else(Vec::new, |data| {
+                data.strokes
+                    .iter()
+                    .map(|s| Arc::new(s.stroke.clone()))
+                    .collect()
+            }),
+            reference_lines: self
+                .edit_data
+                .as_ref()
                 .and_then(|data| data.reference_lines),
             rendered_reference_lines: self.reference_lines,
             fingerprint: crate::storage::FileFingerprint::of(&self.base),

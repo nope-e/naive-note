@@ -12,10 +12,17 @@ use super::{ReferenceLayer, StrokeRecord};
 #[derive(Clone, Debug)]
 pub enum EditCommand {
     AddStroke(Arc<StrokeRecord>),
+    RemoveStrokes(Vec<RemovedStroke>),
     ReferenceLines {
         before: Option<ReferenceLayer>,
         after: ReferenceLayer,
     },
+}
+
+#[derive(Clone, Debug)]
+pub struct RemovedStroke {
+    index: usize,
+    stroke: Arc<StrokeRecord>,
 }
 
 /// Identities name content states, not history depths. Undo/redo return to the
@@ -50,6 +57,36 @@ pub struct EditHistory {
 }
 
 impl EditHistory {
+    pub fn contains_stroke(&self, id: Uuid) -> bool {
+        self.stroke_ids.contains(&id)
+    }
+    /// Verified saved ink is an initial content state, not undoable additions.
+    pub fn from_strokes(strokes: impl IntoIterator<Item = Arc<StrokeRecord>>) -> Self {
+        let mut history = Self::default();
+        for stroke in strokes {
+            history.apply(&EditCommand::AddStroke(stroke));
+        }
+        history
+    }
+
+    /// Capture original per-page positions so a batch undo preserves stacking.
+    pub fn remove_strokes(&mut self, ids: &HashSet<Uuid>) -> bool {
+        let removed = self
+            .strokes
+            .values()
+            .flat_map(|page| {
+                page.iter()
+                    .enumerate()
+                    .filter(|(_, stroke)| ids.contains(&stroke.id))
+                    .map(|(index, stroke)| RemovedStroke {
+                        index,
+                        stroke: Arc::clone(stroke),
+                    })
+            })
+            .collect::<Vec<_>>();
+        !removed.is_empty() && self.execute(EditCommand::RemoveStrokes(removed))
+    }
+
     pub fn revision(&self) -> DocumentRevision {
         self.revision
     }
@@ -77,6 +114,7 @@ impl EditHistory {
     /// A repeated submission cannot duplicate ink or destroy the redo branch.
     pub fn execute(&mut self, command: EditCommand) -> bool {
         match &command {
+            EditCommand::RemoveStrokes(strokes) if strokes.is_empty() => return false,
             EditCommand::AddStroke(stroke) if self.stroke_ids.contains(&stroke.id) => return false,
             EditCommand::ReferenceLines { after, .. } if self.reference_lines == Some(*after) => {
                 return false;
@@ -104,6 +142,15 @@ impl EditHistory {
             return false;
         };
         match &entry.command {
+            EditCommand::RemoveStrokes(strokes) => {
+                for removed in strokes {
+                    self.stroke_ids.insert(removed.stroke.id);
+                    self.strokes
+                        .entry(removed.stroke.page_index)
+                        .or_default()
+                        .insert(removed.index, Arc::clone(&removed.stroke));
+                }
+            }
             EditCommand::ReferenceLines { before, .. } => self.reference_lines = *before,
             EditCommand::AddStroke(stroke) => {
                 let page = self
@@ -137,6 +184,14 @@ impl EditHistory {
 
     fn apply(&mut self, command: &EditCommand) {
         match command {
+            EditCommand::RemoveStrokes(strokes) => {
+                let ids: HashSet<_> = strokes.iter().map(|s| s.stroke.id).collect();
+                self.strokes.retain(|_, page| {
+                    page.retain(|stroke| !ids.contains(&stroke.id));
+                    !page.is_empty()
+                });
+                self.stroke_ids.retain(|id| !ids.contains(id));
+            }
             EditCommand::ReferenceLines { after, .. } => self.reference_lines = Some(*after),
             EditCommand::AddStroke(stroke) => {
                 self.stroke_ids.insert(stroke.id);

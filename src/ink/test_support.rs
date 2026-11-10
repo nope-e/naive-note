@@ -16,6 +16,7 @@ pub fn pressure_stroke(page: PageGeometry) -> Result<StrokeRecord> {
         "Page is too small for the pressure fixture"
     );
     let style = PenStyle {
+        kind: crate::document::InkKind::Pen,
         color_rgb: [25, 105, 190],
         max_width_pt: 8.0_f64.min(size.height * 0.06),
         min_width_ratio: 0.15,
@@ -101,6 +102,7 @@ mod tests {
             pressure: 0.5,
         };
         let style = PenStyle {
+            kind: crate::document::InkKind::Pen,
             color_rgb: [0; 3],
             max_width_pt: 2.0,
             min_width_ratio: 0.2,

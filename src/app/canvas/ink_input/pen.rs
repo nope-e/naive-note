@@ -9,7 +9,7 @@ use crate::{
     ink::LiveStroke,
 };
 
-use super::{CanvasInput, CanvasView};
+use super::{CanvasInput, CanvasTool, CanvasView};
 
 impl CanvasInput {
     /// Returns whether to route this event to egui, plus a completed stroke.
@@ -38,13 +38,23 @@ impl CanvasInput {
             if !ui_owned && self.begin_navigation(position, view, modifiers) {
                 return (false, None);
             }
+            let tool = if sample.eraser || sample.inverted {
+                CanvasTool::Eraser
+            } else {
+                self.tool
+            };
+            if !ui_owned && enabled && self.begin_object(position, view, tool, modifiers.shift) {
+                return (false, None);
+            }
             if !ui_owned
                 && enabled
+                && matches!(self.tool, CanvasTool::Pen | CanvasTool::Highlighter)
                 && !sample.eraser
                 && !sample.inverted
                 && let Some(target) = view.stroke_target(position)
             {
-                let mut stroke = LiveStroke::new(target, self.smoothing, self.style.clone());
+                let mut stroke =
+                    LiveStroke::new(target, self.smoothing, self.current_style().clone());
                 stroke.push_pen(sample);
                 self.active = Some(stroke);
             }
@@ -66,8 +76,10 @@ impl CanvasInput {
         match sample.phase {
             PenPhase::Move => {
                 if !ui_owned && self.update_navigation(position, view, modifiers) {
+                    self.cancel_object();
                     return (false, self.finish_stroke());
                 }
+                self.move_object(position);
                 if let Some(stroke) = self.active.as_mut() {
                     stroke.push_pen(sample);
                 }
@@ -77,7 +89,12 @@ impl CanvasInput {
                 self.contact = None;
                 if !ui_owned && self.update_navigation(position, view, modifiers) {
                     self.navigation = None;
+                    self.cancel_object();
                     return (false, self.finish_stroke());
+                }
+                self.move_object(position);
+                if self.finish_object() {
+                    return (ui_owned, None);
                 }
                 let completed = self.active.take().and_then(|mut stroke| {
                     stroke.push_pen(sample);
