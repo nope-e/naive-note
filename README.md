@@ -77,6 +77,28 @@ cargo run --locked -- 'D:\documents\中文示例.pdf'
 
 在 Windows 中，右键 PDF → **打开方式 → 选择其他应用**，浏览并选择已构建的 `naive-note.exe`，即可让资源管理器将文件路径传给程序。若手动配置打开命令，格式为 `"D:\应用目录\naive-note.exe" "%1"`，程序和文件路径均需保留双引号。
 
+也可使用项目根目录的两个 BAT 脚本管理 PDF 的“打开方式”候选项，无需管理员权限，作用范围仅为当前 Windows 用户：
+
+- 双击 [associate-pdf.bat](associate-pdf.bat) 添加 **Naive Note**。依次查找 BAT 同目录、`target/release/`、`target/debug/` 下的 `naive-note.exe`，使用第一个找到的文件；也可把 BAT 放到发布版 EXE 旁使用。
+- 双击 [unassociate-pdf.bat](unassociate-pdf.bat) 取消关联，同时清理本应用的 PDF“打开方式”历史记录；即使 EXE 已移动或删除也可执行。重复执行可安全跳过已删除的项。
+
+脚本通过 Windows 自带的 PowerShell 写入注册项并通知资源管理器刷新，保留现有默认 PDF 应用。注册使用 [Microsoft 推荐的 OpenWithProgids](https://learn.microsoft.com/en-us/windows/win32/shell/how-to-include-an-application-on-the-open-with-dialog-box)，不会设置 `.pdf` 的默认值或 `UserChoice`。
+
+从 PowerShell 指定 EXE 路径：
+
+```powershell
+.\associate-pdf.bat 'D:\应用目录\naive-note.exe'
+.\unassociate-pdf.bat
+```
+
+EXE 移动后需重新关联，更新注册路径。脚本执行完会暂停以显示结果，按任意键关闭；传入 `/?` 可查看帮助。
+
+关联功能待用户手动验收：
+
+1. 先记录当前默认 PDF 应用，运行关联脚本；右键 PDF → **打开方式**（必要时展开“选择其他应用”），预期出现 **Naive Note**。
+2. 用 **Naive Note** 单次打开中文、带空格路径的 PDF，预期直接载入该文件；双击 PDF，预期仍由原默认应用打开。测试时勿选择“始终使用此应用”。
+3. 运行取消关联脚本，重新打开“打开方式”，预期不再显示 **Naive Note**，其他阅读器和原默认应用保留；再运行一次取消脚本，预期仍成功。
+
 启动路径与“打开文档”和拖入文件共用后台加载及错误提示。窗口行为仍待用户手动验收：
 
 - 对中文和带空格路径的 PDF 使用上述“打开方式”，预期直接加载该文件并定位第一页。
