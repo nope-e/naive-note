@@ -52,6 +52,18 @@ pub(super) fn show(
                         if changed { *action = Some(ToolbarAction::DocumentReference(layer)); }
                     });
                 } else {
+                    widgets::section(ui, "鼠标指针");
+                    let mut cursor = state.settings.cursor;
+                    cursor_editor(ui, "悬停指针", &mut cursor.regular);
+                    ui.add_space(10.0);
+                    ui.checkbox(&mut cursor.show_drawing, "显示书写指针");
+                    ui.add_enabled_ui(cursor.show_drawing, |ui| {
+                        cursor_editor(ui, "书写指针", &mut cursor.drawing);
+                    });
+                    if cursor != state.settings.cursor { *action = Some(ToolbarAction::Cursor(cursor)); }
+                    ui.label(egui::RichText::new("书写时自动切换；移动、缩放和对象工具使用各自的指针。").small().color(theme::MUTED));
+                    ui.add_space(20.0);
+                    ui.separator();
                     widgets::section(ui, "默认参考线");
                     ui.label(egui::RichText::new("用于新建文档和没有参考线元数据的 PDF。已有元数据的文档使用自己的设置。").small().color(theme::MUTED));
                     ui.add_space(10.0);
@@ -72,6 +84,28 @@ pub(super) fn show(
                 }
             });
         });
+}
+
+fn cursor_editor(ui: &mut egui::Ui, label: &str, style: &mut crate::cursor::CursorStyle) {
+    use crate::cursor::{CursorShape, CursorSize};
+    ui.push_id(label, |ui| {
+        ui.label(label);
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("shape")
+                .width(126.0)
+                .selected_text(style.shape.label())
+                .show_ui(ui, |ui| {
+                    for (shape, label) in CursorShape::ALL {
+                        ui.selectable_value(&mut style.shape, shape, label);
+                    }
+                });
+            ui.add_enabled_ui(style.shape != CursorShape::System, |ui| {
+                for (size, label) in CursorSize::ALL {
+                    ui.selectable_value(&mut style.size, size, label);
+                }
+            });
+        });
+    });
 }
 
 fn editor(ui: &mut egui::Ui, lines: &mut ReferenceLines) -> bool {

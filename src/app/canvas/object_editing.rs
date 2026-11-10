@@ -132,10 +132,6 @@ impl ObjectEditing {
                 .gesture
                 .filter(|g| g.tool == CanvasTool::Select && g.target.page_index == page.index)
                 .map(drag_rect);
-            page.eraser_cursor = self
-                .gesture
-                .filter(|g| g.tool == CanvasTool::Eraser && g.target.page_index == page.index)
-                .map(|g| (g.position, 8.0 / g.target.view.scale()));
         }
     }
 }

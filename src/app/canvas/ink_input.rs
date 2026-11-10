@@ -1,5 +1,6 @@
 //! Shared contact ownership and stroke lifetime; no native calls or rendering.
 
+mod cursor;
 mod mouse;
 mod navigation;
 mod objects;
@@ -37,6 +38,8 @@ pub(super) struct CanvasInput {
     object: Option<ObjectGesture>,
     object_events: Vec<ObjectEvent>,
     last_position: Option<Point>,
+    // Hovering pen erasers temporarily override the selected drawing tool.
+    pen_hover: Option<(u32, bool)>,
     pub tool: CanvasTool,
     pub mouse_pen: bool,
     pub smoothing: bool,
@@ -57,6 +60,7 @@ impl Default for CanvasInput {
             object: None,
             object_events: Vec::new(),
             last_position: None,
+            pen_hover: None,
             tool: CanvasTool::default(),
             mouse_pen: false,
             smoothing: true,
@@ -122,6 +126,7 @@ impl CanvasInput {
         self.mouse_active = false;
         self.navigation = None;
         self.last_position = None;
+        self.pen_hover = None;
     }
 
     pub fn finish_for_save(&mut self) -> Option<Arc<StrokeRecord>> {

@@ -1,3 +1,4 @@
+mod cursor;
 mod modeling;
 mod mouse;
 mod navigation;

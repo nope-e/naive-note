@@ -21,6 +21,22 @@ impl CanvasInput {
         modifiers: egui::Modifiers,
     ) -> (bool, Option<Arc<StrokeRecord>>) {
         let position = Point::new(sample.position[0], sample.position[1]);
+        if !self.mouse_active
+            && self
+                .contact
+                .is_none_or(|(pointer, _, _)| pointer == sample.pointer_id)
+        {
+            if matches!(sample.phase, PenPhase::Leave | PenPhase::Cancel) {
+                if self
+                    .pen_hover
+                    .is_some_and(|(pointer, _)| pointer == sample.pointer_id)
+                {
+                    self.pen_hover = None;
+                }
+            } else {
+                self.pen_hover = Some((sample.pointer_id, sample.eraser || sample.inverted));
+            }
+        }
         if sample.phase == PenPhase::Down {
             let Some(id) = sample.stroke_id else {
                 return (false, None);

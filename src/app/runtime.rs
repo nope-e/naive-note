@@ -67,7 +67,11 @@ impl Runtime {
             && !self.window.window.is_minimized().unwrap_or(false)
     }
 
-    pub(super) fn draw(&mut self, show_renderer_info: bool) -> Result<()> {
+    pub(super) fn draw(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        show_renderer_info: bool,
+    ) -> Result<()> {
         if !self.frames.begin_frame(Instant::now()) {
             return Ok(());
         }
@@ -76,7 +80,7 @@ impl Runtime {
         let mut process_input = true;
         let size = self.window.window.inner_size();
         let fps = self.frame_rate.fps();
-        let close_requested = self.renderer.draw(&self.window, |ui| {
+        let close_requested = self.renderer.draw(&self.window, event_loop, |ui| {
             let scene = self.canvas.show(
                 ui,
                 show_renderer_info,

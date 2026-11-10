@@ -227,7 +227,6 @@ impl CanvasView {
                 active_stroke: None,
                 selected_bounds: Vec::new(),
                 selection_rect: None,
-                eraser_cursor: None,
                 draft_paper,
                 reference_lines: crate::document::ReferenceLines::default(),
             })

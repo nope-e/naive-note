@@ -72,7 +72,9 @@ impl Runtime {
                 sample.sample.position[1],
             ));
             if self.canvas.pen_sample(sample, over_ui) {
-                self.renderer.pen_ui_event(sample);
+                self.renderer.pen_ui_event(&self.window.window, sample);
+            } else {
+                self.renderer.pen_pointer_event(&self.window.window, sample);
             }
         }
         if self.pen.take_cancel_request() {

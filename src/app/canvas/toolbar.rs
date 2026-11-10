@@ -34,6 +34,7 @@ pub(super) enum ToolbarAction {
     Smoothing,
     DismissNotice,
     AutosaveInterval(u64),
+    Cursor(crate::cursor::CursorSettings),
     RecoverDrafts,
     Color([u8; 3]),
     Width(f64),

@@ -356,6 +356,7 @@ impl CanvasWorkspace {
                             | ToolbarAction::PressureGamma(_)
                             | ToolbarAction::DismissNotice
                             | ToolbarAction::AutosaveInterval(_)
+                            | ToolbarAction::Cursor(_)
                     )
                 )
             {
@@ -451,6 +452,11 @@ impl CanvasWorkspace {
                 Some(ToolbarAction::AutosaveInterval(seconds)) => {
                     self.persistence.settings.autosave_seconds = seconds;
                     self.persistence.timer = AutosaveTimer::new(Instant::now(), seconds);
+                    self.persist_settings();
+                    action = None;
+                }
+                Some(ToolbarAction::Cursor(cursor)) => {
+                    self.persistence.settings.cursor = cursor;
                     self.persist_settings();
                     action = None;
                 }
@@ -600,6 +606,14 @@ impl CanvasWorkspace {
         {
             ui.ctx().request_repaint();
         }
+        let cursor = (!self.canvas_blocked()).then(|| {
+            self.input.cursor(
+                self.persistence.settings.cursor,
+                ui.input(|input| input.modifiers),
+                self.area.dragging(),
+            )
+        });
+        self.area.update_cursor(ui.ctx(), cursor);
         scene
     }
 }

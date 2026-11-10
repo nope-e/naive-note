@@ -25,6 +25,7 @@ impl CanvasInput {
             if self.contact.is_some() || self.mouse_active {
                 return (false, None);
             }
+            self.pen_hover = None;
             let Some(position) = position else {
                 return (false, None);
             };
@@ -91,6 +92,9 @@ impl CanvasInput {
         view: &mut CanvasView,
         modifiers: egui::Modifiers,
     ) -> Option<Arc<StrokeRecord>> {
+        if self.contact.is_none() {
+            self.pen_hover = None;
+        }
         if !self.mouse_active {
             return None;
         }

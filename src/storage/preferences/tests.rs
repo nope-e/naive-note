@@ -43,6 +43,17 @@ fn settings_roundtrip_rejects_corruption_versions_and_out_of_range_values() {
         highlighter_color: [255, 170, 20],
         highlighter_width: 18.,
         highlighter_pressure_gamma: 0.5,
+        cursor: crate::cursor::CursorSettings {
+            regular: crate::cursor::CursorStyle {
+                shape: crate::cursor::CursorShape::TeardropNorthWest,
+                size: crate::cursor::CursorSize::Large,
+            },
+            drawing: crate::cursor::CursorStyle {
+                shape: crate::cursor::CursorShape::Crosshair,
+                size: crate::cursor::CursorSize::Small,
+            },
+            show_drawing: false,
+        },
         ..Settings::default()
     };
     write_settings(&path, &settings).unwrap();
@@ -83,6 +94,28 @@ fn settings_roundtrip_rejects_corruption_versions_and_out_of_range_values() {
     }
     fs::write(&path, b"corrupt settings").unwrap();
     assert!(read_settings(&path).is_err());
+}
+
+#[test]
+fn older_settings_get_default_cursors_and_partial_cursor_settings_keep_defaults() {
+    let directory = Directory::new();
+    let path = directory.0.join("settings.json");
+    let mut old = serde_json::to_value(Settings::default()).unwrap();
+    old.as_object_mut().unwrap().remove("cursor");
+    old["color"] = serde_json::json!([180, 40, 60]);
+    fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+    let restored = read_settings(&path).unwrap();
+    assert_eq!(restored.color, [180, 40, 60]);
+    assert_eq!(restored.cursor, crate::cursor::CursorSettings::default());
+    old["cursor"] = serde_json::json!({"show_drawing": false});
+    fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+    assert_eq!(
+        read_settings(&path).unwrap().cursor,
+        crate::cursor::CursorSettings {
+            show_drawing: false,
+            ..Default::default()
+        }
+    );
 }
 
 #[test]

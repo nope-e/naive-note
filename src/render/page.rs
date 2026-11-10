@@ -153,14 +153,6 @@ pub(super) fn draw(
         selection.set_style(Style::Fill).set_alpha(28);
         canvas.draw_rect(rect, &selection);
     }
-    if let Some((position, radius)) = scene.eraser_cursor {
-        selection.set_style(Style::Stroke).set_alpha(255);
-        canvas.draw_circle(
-            (position.x as f32, position.y as f32),
-            radius as f32,
-            &selection,
-        );
-    }
     canvas.restore();
 
     paint

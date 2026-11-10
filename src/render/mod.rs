@@ -9,7 +9,12 @@ use std::{sync::Arc, time::Instant};
 
 use anyhow::{Result, anyhow};
 use egui_glow::glow::{self, HasContext};
-use winit::{dpi::PhysicalSize, event::WindowEvent, event_loop::EventLoopProxy, window::Window};
+use winit::{
+    dpi::PhysicalSize,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, EventLoopProxy},
+    window::Window,
+};
 
 use crate::{
     app::UserEvent,
@@ -36,7 +41,6 @@ pub struct PageScene {
     pub active_stroke: Option<crate::ink::ActiveInk>,
     pub selected_bounds: Vec<crate::document::Rect>,
     pub selection_rect: Option<crate::document::Rect>,
-    pub eraser_cursor: Option<(Point, f64)>,
     pub draft_paper: bool,
     pub reference_lines: crate::document::ReferenceLines,
 }
@@ -76,11 +80,15 @@ impl Renderer {
     }
 
     /// Native pen contacts outside the canvas operate UI controls exactly once.
-    pub fn pen_ui_event(&mut self, event: crate::platform::PenEvent) {
+    pub fn pen_ui_event(&mut self, window: &Window, event: crate::platform::PenEvent) {
         use tablet_input_windows::PenPhase;
         let crate::platform::PenEvent { sample, modifiers } = event;
         if sample.phase == PenPhase::Cancel {
             self.cancel_pen_ui();
+            return;
+        }
+        self.pen_pointer_event(window, event);
+        if sample.phase == PenPhase::Leave {
             return;
         }
         let scale = self.ui.context.pixels_per_point();
@@ -89,12 +97,6 @@ impl Renderer {
             sample.position[1] as f32 / scale,
         );
         let input = self.ui.state.egui_input_mut();
-        input.events.push(egui::Event::ModifiersChanged(modifiers));
-        if sample.phase == PenPhase::Leave {
-            input.events.push(egui::Event::PointerGone);
-            return;
-        }
-        input.events.push(egui::Event::PointerMoved(pos));
         if matches!(sample.phase, PenPhase::Down | PenPhase::Up) {
             input.events.push(egui::Event::PointerButton {
                 pos,
@@ -103,6 +105,33 @@ impl Renderer {
                 modifiers,
             });
         }
+    }
+
+    /// Canvas-owned pen samples still move the hover pointer, without sending
+    /// buttons to egui or giving UI controls ownership of the stroke.
+    pub fn pen_pointer_event(&mut self, window: &Window, event: crate::platform::PenEvent) {
+        use tablet_input_windows::PenPhase;
+        self.ui
+            .state
+            .egui_input_mut()
+            .events
+            .push(egui::Event::ModifiersChanged(event.modifiers));
+        // Only egui-winit receives this virtual pointer event. Its cursor cache
+        // must know the pointer is in the window even when promoted pen mouse
+        // messages were filtered out. The device id is ignored by this path.
+        let device_id = winit::event::DeviceId::dummy();
+        let pointer = if matches!(event.sample.phase, PenPhase::Leave | PenPhase::Cancel) {
+            WindowEvent::CursorLeft { device_id }
+        } else {
+            WindowEvent::CursorMoved {
+                device_id,
+                position: winit::dpi::PhysicalPosition::new(
+                    event.sample.position[0],
+                    event.sample.position[1],
+                ),
+            }
+        };
+        let _ = self.ui.state.on_window_event(window, &pointer);
     }
 
     pub fn cancel_pen_ui(&mut self) {
@@ -132,6 +161,7 @@ impl Renderer {
     pub fn draw(
         &mut self,
         window: &GlWindow,
+        event_loop: &ActiveEventLoop,
         mut build_ui: impl FnMut(&mut egui::Ui) -> Option<CanvasScene>,
     ) -> Result<bool> {
         self.resize(window)?;
@@ -149,9 +179,11 @@ impl Renderer {
         let input = self.ui.state.take_egui_input(&window.window);
         let mut scene = None;
         let mut output = self.ui.context.run_ui(input, |ui| scene = build_ui(ui));
-        self.ui
-            .state
-            .handle_platform_output(&window.window, output.platform_output);
+        self.ui.state.handle_platform_output_with_event_loop(
+            &window.window,
+            event_loop,
+            output.platform_output,
+        );
         let primitives = self
             .ui
             .context

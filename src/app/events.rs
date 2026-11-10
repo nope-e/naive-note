@@ -31,7 +31,7 @@ impl ApplicationHandler<UserEvent> for Application {
                 // Windows may defer RedrawRequested for a hidden window. Submit the
                 // first frame synchronously before showing it, rather than waiting
                 // for a redraw that itself depends on the window becoming visible.
-                if let Err(error) = runtime.draw(self.show_renderer_info) {
+                if let Err(error) = runtime.draw(event_loop, self.show_renderer_info) {
                     self.fail(event_loop, error);
                     return;
                 }
@@ -109,7 +109,7 @@ impl ApplicationHandler<UserEvent> for Application {
                 runtime.request_repaint();
             }
             WindowEvent::RedrawRequested if runtime.can_draw() => {
-                if let Err(error) = runtime.draw(self.show_renderer_info) {
+                if let Err(error) = runtime.draw(event_loop, self.show_renderer_info) {
                     self.fail(event_loop, error);
                     return;
                 }

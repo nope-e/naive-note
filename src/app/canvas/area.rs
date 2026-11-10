@@ -11,6 +11,9 @@ use super::{
 pub(super) struct CanvasArea {
     wheel_owned: bool,
     scrollbars: Scrollbars,
+    pointer_over_canvas: bool,
+    dragging: bool,
+    cursors: crate::cursor::CursorImages,
 }
 
 pub(super) struct ZoomGesture {
@@ -26,6 +29,27 @@ pub(super) struct CanvasResponse {
 }
 
 impl CanvasArea {
+    pub fn dragging(&self) -> bool {
+        self.dragging
+    }
+
+    pub fn update_cursor(
+        &mut self,
+        context: &egui::Context,
+        cursor: Option<crate::cursor::CanvasCursor>,
+    ) {
+        // The bitmap is sticky in egui, so explicitly clear it over chrome,
+        // popups, modals, after cancellation, and when there is no document.
+        context.set_cursor_image(None);
+        if self.pointer_over_canvas
+            && context.input(|input| input.raw.focused)
+            && !egui::Popup::is_any_open(context)
+            && let Some(cursor) = cursor
+        {
+            self.cursors.apply(context, cursor);
+        }
+    }
+
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -56,6 +80,9 @@ impl CanvasArea {
                     ui.scope_id().with("canvas_area"),
                     egui::Sense::click_and_drag(),
                 );
+                self.pointer_over_canvas = response.hovered();
+                self.dragging = response.dragged_by(egui::PointerButton::Primary)
+                    || response.dragged_by(egui::PointerButton::Middle);
                 let logical = Rect::new(
                     f64::from(rect.min.x),
                     f64::from(rect.min.y),
@@ -92,16 +119,10 @@ impl CanvasArea {
 
                 // egui retains ownership when dragging outside the canvas; a
                 // gesture begun on another widget cannot become a canvas drag.
-                let dragging = response.dragged_by(egui::PointerButton::Primary)
-                    || response.dragged_by(egui::PointerButton::Middle);
-                let drag_delta = if process_input && dragging {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                let drag_delta = if process_input && self.dragging {
                     let delta = response.drag_delta();
                     Some(Point::new(f64::from(delta.x), f64::from(delta.y)))
                 } else {
-                    if response.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                    }
                     None
                 };
 
