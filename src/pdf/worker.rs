@@ -21,7 +21,6 @@ enum Command {
     Open {
         request: u64,
         path: PathBuf,
-        reference_defaults: ReferenceLines,
     },
     Render {
         document: u64,
@@ -63,11 +62,7 @@ impl PdfWorker {
                 let mut session = None;
                 while let Ok(command) = receiver.recv() {
                     match command {
-                        Command::Open {
-                            request,
-                            path,
-                            reference_defaults,
-                        } => {
+                        Command::Open { request, path } => {
                             if request != worker_latest.load(Ordering::Acquire) {
                                 continue;
                             }
@@ -75,7 +70,6 @@ impl PdfWorker {
                                 if request != worker_latest.load(Ordering::Acquire) {
                                     return Ok(None);
                                 }
-                                opened.use_reference_defaults(reference_defaults);
                                 let preview = opened.preview(&path)?;
                                 Ok(Some((opened, preview)))
                             });
@@ -210,15 +204,11 @@ impl PdfWorker {
         })
     }
 
-    pub fn open(&self, path: PathBuf, reference_defaults: ReferenceLines) -> Result<u64> {
+    pub fn open(&self, path: PathBuf) -> Result<u64> {
         self.cancel_render();
         let request = self.invalidate();
         self.sender
-            .send(Command::Open {
-                request,
-                path,
-                reference_defaults,
-            })
+            .send(Command::Open { request, path })
             .context("MuPDF worker stopped")?;
         Ok(request)
     }

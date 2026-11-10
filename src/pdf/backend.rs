@@ -69,29 +69,28 @@ impl PdfSession {
                 .with_context(|| format!("Cannot load PDF page {}", index + 1))?;
             pages.push(page_geometry(&page)?);
         }
+        let reference_lines = super::save::read_edit_data(&document)
+            .ok()
+            .flatten()
+            .and_then(|data| data.reference_lines)
+            .map_or(
+                ReferenceLines {
+                    pattern: ReferencePattern::None,
+                    ..ReferenceLines::default()
+                },
+                |layer| layer.lines,
+            );
         Ok(Self {
             base: bytes.into(),
             document,
             pages,
             prepared: VecDeque::new(),
-            reference_lines: ReferenceLines {
-                pattern: ReferencePattern::None,
-                ..ReferenceLines::default()
-            },
+            reference_lines,
         })
     }
 
     pub fn base(&self) -> &[u8] {
         &self.base
-    }
-
-    pub fn use_reference_defaults(&mut self, defaults: ReferenceLines) {
-        let lines = super::save::read_edit_data(&self.document)
-            .ok()
-            .flatten()
-            .and_then(|data| data.reference_lines)
-            .map_or(defaults, |layer| layer.lines);
-        self.set_reference_lines(lines);
     }
 
     pub fn set_reference_lines(&mut self, lines: ReferenceLines) {

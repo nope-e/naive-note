@@ -22,7 +22,10 @@ fn fixture_pdf() -> LoadedPdf {
             bounds: Rect::new(0.0, 0.0, 600.0, 800.0),
         }),
         reference_lines: None,
-        rendered_reference_lines: ReferenceLines::default(),
+        rendered_reference_lines: ReferenceLines {
+            pattern: crate::document::ReferencePattern::None,
+            ..ReferenceLines::default()
+        },
         edit_data_status: "Existing annotations in immutable base".to_owned(),
         fingerprint: crate::storage::FileFingerprint::of(b"fixture"),
     }
@@ -290,7 +293,7 @@ fn discard_queues_cleanup_after_an_inflight_draft_save_and_ignores_its_late_resp
 }
 
 #[test]
-fn reference_defaults_follow_global_until_save_and_existing_metadata_wins() {
+fn global_reference_defaults_only_apply_to_new_documents_and_metadata_wins() {
     use crate::document::ReferencePattern;
     let mut doc = document();
     let lines = ReferenceLines {
@@ -312,14 +315,25 @@ fn reference_defaults_follow_global_until_save_and_existing_metadata_wins() {
         request: 50,
         result: Ok(fixture_pdf()),
     });
-    assert_eq!(
-        doc.reference_layer(),
-        ReferenceLayer {
-            lines,
-            embed_in_pdf: false
-        }
-    );
-    assert!(doc.reference_uses_global());
+    let disabled = ReferenceLayer {
+        lines: ReferenceLines {
+            pattern: ReferencePattern::None,
+            ..ReferenceLines::default()
+        },
+        embed_in_pdf: false,
+    };
+    assert_eq!(doc.reference_layer(), disabled);
+    assert!(!doc.reference_uses_global());
+    doc.set_global_reference(ReferenceLines { width: 64.0, ..lines });
+    assert_eq!(doc.reference_layer(), disabled);
+    assert!(!doc.is_dirty());
+    let enabled = ReferenceLayer { lines, ..disabled };
+    doc.set_reference_layer(enabled);
+    assert_eq!(doc.reference_layer(), enabled);
+    doc.undo();
+    assert_eq!(doc.reference_layer(), disabled);
+    doc.redo();
+    assert_eq!(doc.reference_layer(), enabled);
     let metadata = ReferenceLayer {
         lines: ReferenceLines::default(),
         embed_in_pdf: true,
@@ -342,6 +356,7 @@ fn reference_defaults_follow_global_until_save_and_existing_metadata_wins() {
             embed_in_pdf: true
         }
     );
+    assert!(doc.reference_uses_global());
 }
 
 #[test]

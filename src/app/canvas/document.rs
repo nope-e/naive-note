@@ -13,7 +13,7 @@ use crate::{
     app::UserEvent,
     document::{
         DocumentRevision, EditCommand, EditHistory, PageGeometry, ReferenceLayer, ReferenceLines,
-        StrokeRecord,
+        ReferencePattern, StrokeRecord,
     },
     pdf::{LoadedPdf, OpenResponse, PdfResponse, PdfWorker},
     render::CanvasScene,
@@ -83,7 +83,7 @@ impl CanvasDocument {
         if let Some(loaded) = self.loaded.as_mut() {
             loaded.preview.cancel(&self.worker);
         }
-        match self.worker.open(path, self.global_reference) {
+        match self.worker.open(path) {
             Ok(request) => {
                 self.pending = Some(request);
                 self.message = Some("Loading PDF...".to_owned());
@@ -187,14 +187,23 @@ impl CanvasDocument {
         self.edits
             .reference_lines
             .or(self.reference_metadata)
-            .unwrap_or(ReferenceLayer {
-                lines: self.global_reference,
+            .unwrap_or_else(|| ReferenceLayer {
+                lines: if self.is_loaded() {
+                    ReferenceLines {
+                        pattern: ReferencePattern::None,
+                        ..ReferenceLines::default()
+                    }
+                } else {
+                    self.global_reference
+                },
                 embed_in_pdf: !self.is_loaded(),
             })
     }
 
     pub fn reference_uses_global(&self) -> bool {
-        self.edits.reference_lines.is_none() && self.reference_metadata.is_none()
+        !self.is_loaded()
+            && self.edits.reference_lines.is_none()
+            && self.reference_metadata.is_none()
     }
 
     pub fn set_reference_layer(&mut self, layer: ReferenceLayer) {

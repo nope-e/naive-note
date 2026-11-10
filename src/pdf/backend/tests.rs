@@ -709,7 +709,7 @@ fn reopened_display_list_places_references_between_source_and_existing_ink() {
                 result
             };
             let mut session = PdfSession::from_bytes(&bytes).unwrap();
-            session.use_reference_defaults(lines);
+            session.set_reference_lines(lines);
             let commands = Rc::new(RefCell::new(Commands::default()));
             let device = Device::from_native(Rc::clone(&commands)).unwrap();
             let prepared = session.prepare(0).unwrap();

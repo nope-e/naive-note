@@ -55,7 +55,7 @@ pub(super) fn show(
                     });
                 } else {
                     widgets::section(ui, "默认参考线");
-                    ui.label(egui::RichText::new("用于新建文档和没有参考线元数据的 PDF。已有元数据的文档使用自己的设置。").small().color(theme::MUTED));
+                    ui.label(egui::RichText::new("仅用于应用内新建文档。打开 PDF 时使用文档自己的设置，没有配置则不显示参考线。").small().color(theme::MUTED));
                     ui.add_space(10.0);
                     let mut lines = state.settings.reference_lines;
                     if ui.push_id("global_reference", |ui| editor(ui, &mut lines, color_picker)).inner { *action = Some(ToolbarAction::GlobalReference(lines)); }
