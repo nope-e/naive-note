@@ -675,7 +675,65 @@ fn saved_reference_vectors_are_removed_only_from_the_live_render_document() {
 }
 
 #[test]
-fn reopened_display_list_keeps_foreign_ink_and_moves_verified_ink_to_editable_overlay() {
+fn reopening_after_external_deletion_keeps_other_ink_editable_and_restores_settings() {
+    use crate::document::{InkKind, ReferenceLayer};
+
+    let source = pdf_bytes("/MediaBox [0 0 200 300]");
+    let geometry = PdfSession::from_bytes(&source).unwrap().pages[0];
+    let first = Arc::new(crate::ink::test_support::pressure_stroke(geometry).unwrap());
+    let mut second = crate::ink::test_support::pressure_stroke(geometry).unwrap();
+    second.style.kind = InkKind::Highlighter;
+    let second = Arc::new(second);
+    let layer = ReferenceLayer {
+        lines: ReferenceLines::default(),
+        embed_in_pdf: true,
+        auto_expand: false,
+    };
+    let (bytes, data) = super::super::save::serialize_with_reference(
+        &source,
+        &[first.clone(), second.clone()],
+        uuid::Uuid::new_v4(),
+        layer,
+        &[],
+    )
+    .unwrap();
+    for delete_all in [false, true] {
+        let document = PdfDocument::from_bytes(&bytes).unwrap();
+        let mut page = document.load_pdf_page(0).unwrap();
+        for annotation in page.annotations().collect::<Vec<_>>() {
+            let id = annotation
+                .object()
+                .get_dict("NM")
+                .unwrap()
+                .unwrap()
+                .as_string()
+                .unwrap();
+            if delete_all || id == first.id.to_string() {
+                page.delete_annotation(annotation).unwrap();
+            }
+        }
+        let mut external = Vec::new();
+        document.write_to(&mut external).unwrap();
+        // Parsing and annotation structure only; no preview or pixels are requested.
+        let session = PdfSession::from_bytes(&external).unwrap();
+        let restored = session.edit_data.as_ref().unwrap();
+        assert_eq!(restored.document_id, data.document_id);
+        assert_eq!(restored.reference_lines, Some(layer));
+        assert_eq!(session.reference_lines, layer.lines);
+        if delete_all {
+            assert!(restored.strokes.is_empty());
+        } else {
+            assert_eq!(restored.strokes[0].stroke, *second);
+            assert_eq!(restored.strokes.len(), 1);
+        }
+        assert_eq!(session.first_page().unwrap().annotations().count(), 0);
+        assert_eq!(session.base(), external);
+        assert!(session.edit_data_status.contains("stroke(s) skipped"));
+    }
+}
+
+#[test]
+fn reopened_display_list_moves_verified_and_unverified_ink_to_editable_overlay() {
     // Inspect vector command order only: no pixels, framebuffer, window or image.
     use crate::document::ReferenceLayer;
     use mupdf::{ColorParams, NativeDevice, StrokeState};
@@ -781,10 +839,12 @@ fn reopened_display_list_keeps_foreign_ink_and_moves_verified_ink_to_editable_ov
                 assert_eq!(session.base(), bytes);
             } else {
                 assert!(
-                    reference < ink.unwrap(),
-                    "foreign ink stays in the immutable preview"
+                    ink.is_none(),
+                    "standard ink is also drawn by the object overlay"
                 );
                 assert!(session.edit_data.is_none());
+                assert_eq!(session.objects.len(), 1);
+                assert!(!session.objects[0].edit_data_verified);
             }
             session.set_reference_lines(ReferenceLines {
                 pattern: ReferencePattern::None,

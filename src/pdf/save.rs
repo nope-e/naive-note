@@ -1,5 +1,9 @@
 //! Standard Ink annotations, pressure appearances and verified full-copy serialization.
 
+mod loading;
+
+pub(super) use loading::{load_edit_data, read_edit_data};
+
 use std::{collections::HashSet, fmt::Write as _, fs, io::Read, path::Path};
 
 use anyhow::{Context, Result, ensure};
@@ -15,7 +19,7 @@ use crate::document::{InkKind, PageGeometry, PathCommand, Point, ReferenceLayer,
 
 use super::{
     backend::page_geometry,
-    edit_data::{EditData, FORMAT_VERSION, MAX_EDIT_BYTES, SavedStroke},
+    edit_data::{EditData, FORMAT_VERSION, SavedStroke},
 };
 
 pub(super) fn read_pdf(path: &Path) -> Result<Vec<u8>> {
@@ -135,6 +139,7 @@ fn add_stroke(document: &mut PdfDocument, stroke: &StrokeRecord) -> Result<Saved
 
 /// Replace verified native ink with the complete editable snapshot. Annotations
 /// without trusted metadata remain part of the immutable source.
+#[cfg(test)]
 pub(super) fn serialize_with_reference(
     base: &[u8],
     strokes: &[std::sync::Arc<StrokeRecord>],
@@ -142,25 +147,66 @@ pub(super) fn serialize_with_reference(
     reference_lines: ReferenceLayer,
     appended_pages: &[PageGeometry],
 ) -> Result<(Vec<u8>, EditData)> {
+    serialize_with_annotations(
+        base,
+        strokes,
+        document_id,
+        reference_lines,
+        appended_pages,
+        &[],
+    )
+}
+
+/// Persist the complete object snapshot while retaining current standard APs.
+pub(super) fn serialize_with_annotations(
+    base: &[u8],
+    strokes: &[std::sync::Arc<StrokeRecord>],
+    document_id: Uuid,
+    reference_lines: ReferenceLayer,
+    appended_pages: &[PageGeometry],
+    annotation_sources: &[std::sync::Arc<crate::document::PdfAnnotationSource>],
+) -> Result<(Vec<u8>, EditData)> {
     let mut document = PdfDocument::from_bytes(base)?;
     ensure_writable(&document)?;
-    let previous = read_edit_data(&document).unwrap_or_else(|error| {
-        log::warn!("Replacing ignored edit metadata during save: {error:#}");
-        None
-    });
+    let (previous, _) = load_edit_data(&document);
     if let Some(data) = &previous {
         remove_editable_ink(&document, data)?;
     }
     for geometry in appended_pages {
         append_blank_page(&mut document, *geometry)?;
     }
+    if !annotation_sources.is_empty() {
+        super::annotations::apply_edits(&mut document, annotation_sources, strokes)?;
+        // Raw page memberships changed; reload MuPDF's cached annotation lists.
+        let mut updated = Vec::new();
+        document.write_to(&mut updated)?;
+        document = PdfDocument::from_bytes(&updated)?;
+    }
+    // If private settings are unavailable and the user has kept the plain-PDF
+    // defaults, existing reference vectors are ordinary source content. Do not
+    // strip them or claim that we can reconstruct their settings on reopening.
+    let preserve_references = previous
+        .as_ref()
+        .and_then(|data| data.reference_lines)
+        .is_none()
+        && reference_lines
+            == ReferenceLayer {
+                lines: crate::document::ReferenceLines {
+                    pattern: crate::document::ReferencePattern::None,
+                    ..Default::default()
+                },
+                embed_in_pdf: false,
+                auto_expand: false,
+            };
     let mut data = EditData {
         format_version: FORMAT_VERSION,
         document_id: previous.map_or(document_id, |data| data.document_id),
         strokes: Vec::new(),
-        reference_lines: Some(reference_lines),
+        reference_lines: (!preserve_references).then_some(reference_lines),
     };
-    super::reference_lines::write(&mut document, reference_lines)?;
+    if !preserve_references {
+        super::reference_lines::write(&mut document, reference_lines)?;
+    }
     let mut ids: HashSet<_> = data.strokes.iter().map(|s| s.stroke.id).collect();
     // Also reserve UUIDs of standard annotations whose metadata was discarded.
     for index in 0..document.page_count()? {
@@ -177,11 +223,17 @@ pub(super) fn serialize_with_reference(
         counts[index as usize] = document.load_pdf_page(index)?.annotations().count();
     }
     for stroke in strokes {
+        if stroke.pdf_annotation.is_some() {
+            continue;
+        }
         ensure!(ids.insert(stroke.id), "Duplicate stroke UUID");
         let index = stroke.page_index as usize;
         ensure!(index < counts.len(), "Stroke page is out of range");
         data.strokes.push(add_stroke(&mut document, stroke)?);
         counts[index] += 1;
+    }
+    if !annotation_sources.is_empty() {
+        super::annotations::order_objects(&document, annotation_sources, strokes)?;
     }
     flatten_embedded_files(&document)?;
     remove_edit_attachments(&document)?;
@@ -216,6 +268,7 @@ pub(super) fn serialize_with_reference(
             "Saved annotation count changed"
         );
     }
+    super::annotations::verify_saved(&document, &reopened, annotation_sources)?;
     verify_data(&bytes, &data)?;
     Ok((bytes, data))
 }
@@ -361,88 +414,6 @@ fn attachment_names(document: &PdfDocument) -> Result<Vec<String>> {
         names.push(String::from_utf8(key.as_name()?)?);
     }
     Ok(names)
-}
-
-pub(super) fn read_edit_data(document: &PdfDocument) -> Result<Option<EditData>> {
-    let names: Vec<_> = attachment_names(document)?
-        .into_iter()
-        .filter(|n| n.starts_with("naive-note.") && n.ends_with(".cbor.zst"))
-        .collect();
-    ensure!(names.len() <= 1, "Multiple Naive Note edit attachments");
-    let Some(name) = names.first() else {
-        return Ok(None);
-    };
-    // Work around the binding's flat-only reader without modifying the document.
-    let flat = document.load_name_tree(PdfObject::new_name("EmbeddedFiles")?)?;
-    let spec = required(&flat, name)?;
-    let ef = required(&spec, "EF")?;
-    let stream = ef
-        .get_dict("UF")?
-        .or(ef.get_dict("F")?)
-        .context("Missing embedded file stream")?;
-    if let Some(length) = stream.get_dict("Length")? {
-        ensure!(
-            length.as_int()? >= 0 && length.as_int()? as usize <= MAX_EDIT_BYTES,
-            "Edit attachment exceeds the 8 MiB limit"
-        );
-    }
-    let data = EditData::decode(&stream.read_stream()?)?;
-    ensure!(
-        &data.filename() == name,
-        "Attachment document UUID does not match its name"
-    );
-    let mut ids = HashSet::new();
-    for saved in &data.strokes {
-        ensure!(
-            ids.insert(saved.stroke.id),
-            "Duplicate stroke UUID in attachment"
-        );
-        let page = document.load_pdf_page(i32::try_from(saved.stroke.page_index)?)?;
-        let geometry = page_geometry(&page)?;
-        validate_stroke(&saved.stroke, geometry)?;
-        let mut matched = Vec::new();
-        for annotation in page.annotations() {
-            let object = annotation.object();
-            if object
-                .get_dict("NM")?
-                .map(|id| id.as_string())
-                .transpose()?
-                .as_deref()
-                == Some(&saved.stroke.id.to_string())
-            {
-                matched.push(object);
-            }
-        }
-        ensure!(
-            matched.len() == 1,
-            "Missing or duplicated annotation {}",
-            saved.stroke.id
-        );
-        let object = &matched[0];
-        ensure!(
-            is_name(object.get_dict("Subtype")?, b"Ink")?,
-            "Annotation is no longer Ink"
-        );
-        ensure!(
-            fingerprint(object)? == saved.annotation_sha256,
-            "Annotation fingerprint mismatch for {}",
-            saved.stroke.id
-        );
-        verify_geometry(object, &saved.stroke, geometry)?;
-    }
-    Ok(Some(data))
-}
-
-pub(super) fn edit_data_status(document: &PdfDocument) -> String {
-    match read_edit_data(document) {
-        Ok(Some(data)) => format!(
-            "Edit data v{}: {} verified stroke(s)",
-            data.format_version,
-            data.strokes.len()
-        ),
-        Ok(None) => "No Naive Note edit data".to_owned(),
-        Err(error) => format!("Edit data ignored: {error:#}"),
-    }
 }
 
 fn validate_stroke(stroke: &StrokeRecord, geometry: PageGeometry) -> Result<()> {

@@ -294,12 +294,16 @@ fn save_snapshot(snapshot: &SaveSnapshot, session: Option<&(u64, PdfSession)>) -
         draft = super::save::draft_pdf(snapshot.draft_page)?;
         &draft
     };
-    let (bytes, data) = super::save::serialize_with_reference(
+    let annotation_sources = session
+        .filter(|(id, _)| Some(*id) == snapshot.document)
+        .map_or(&[][..], |(_, opened)| opened.annotation_sources());
+    let (bytes, data) = super::save::serialize_with_annotations(
         base,
         &snapshot.strokes,
         snapshot.document_id,
         snapshot.reference_lines,
         &snapshot.appended_pages,
+        annotation_sources,
     )?;
     let fingerprint = storage::save_atomic(&snapshot.path, expected, &bytes, |path| {
         let disk = super::save::read_pdf(path)?;

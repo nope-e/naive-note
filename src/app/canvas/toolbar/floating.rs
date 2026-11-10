@@ -252,6 +252,15 @@ impl WorkspaceToolbar {
                     icons::separator(ui);
                     icons::button(ui, Icon::Text, "文本", false, false);
                     if state.document.tool.is_selection() {
+                        if state.document.selected_unverified_count > 0 {
+                            ui.label(format!(
+                                "未校验 {}",
+                                state.document.selected_unverified_count
+                            ))
+                            .on_hover_text(
+                                "原始笔迹数据未通过校验或不存在；仍可删除、移动和旋转当前 PDF 批注",
+                            );
+                        }
                         if ui
                             .add_enabled(state.can_edit_document, egui::Button::new("全选本页"))
                             .on_hover_text("Ctrl+A")

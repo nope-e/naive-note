@@ -1,5 +1,6 @@
 //! Renderer-independent page geometry, viewport transforms and stroke records.
 
+mod annotation;
 mod edit;
 mod geometry;
 mod ink_transform;
@@ -9,6 +10,7 @@ mod reference_lines;
 mod stroke;
 mod view;
 
+pub use annotation::PdfAnnotationSource;
 pub use edit::{DocumentRevision, EditCommand, EditHistory};
 pub use geometry::{PageGeometry, Point, Rect, Rotation, Size};
 pub use ink_transform::InkTransform;

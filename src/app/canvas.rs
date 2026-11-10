@@ -353,6 +353,9 @@ impl CanvasWorkspace {
                     smoothing: self.input.smoothing,
                     recovery_count: self.persistence.drafts.len(),
                     selected_count: self.objects.selected_count(),
+                    selected_unverified_count: self
+                        .objects
+                        .selected_unverified_count(&self.document),
                 },
                 settings: &self.persistence.settings,
                 reference_layer: self.document.reference_layer(),

@@ -264,6 +264,10 @@ impl CanvasDocument {
         self.edits.contains_stroke(id)
     }
 
+    pub fn unverified_count(&self, ids: &std::collections::HashSet<uuid::Uuid>) -> usize {
+        self.edits.unverified_count(ids)
+    }
+
     pub fn remove_strokes(&mut self, ids: &std::collections::HashSet<uuid::Uuid>) {
         if self.can_ink() && self.edits.remove_strokes(ids) {
             self.edit_changed();

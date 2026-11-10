@@ -24,6 +24,10 @@ impl ObjectEditing {
         self.selected.len()
     }
 
+    pub fn selected_unverified_count(&self, document: &CanvasDocument) -> usize {
+        document.unverified_count(&self.selected)
+    }
+
     pub fn clear(&mut self) {
         *self = Self::default();
     }

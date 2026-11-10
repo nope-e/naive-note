@@ -165,6 +165,14 @@ impl EditHistory {
         self.stroke_ids.len()
     }
 
+    pub fn unverified_count(&self, ids: &HashSet<Uuid>) -> usize {
+        self.strokes
+            .values()
+            .flatten()
+            .filter(|stroke| ids.contains(&stroke.id) && !stroke.edit_data_verified)
+            .count()
+    }
+
     pub fn snapshot(&self) -> Vec<Arc<StrokeRecord>> {
         self.strokes.values().flatten().cloned().collect()
     }

@@ -6,6 +6,19 @@ impl StrokeRecord {
     /// Even-odd lasso containment of the complete pressure outline, including
     /// concave boundaries between samples. Crossing the lasso is not enclosure.
     pub fn enclosed_by_lasso(&self, polygon: &[Point]) -> bool {
+        if let Some(corners) = self.annotation_corners() {
+            return polygon.len() >= 3
+                && corners.iter().all(|p| point_in_polygon(*p, polygon))
+                && !polygon
+                    .iter()
+                    .zip(polygon.iter().cycle().skip(1))
+                    .take(polygon.len())
+                    .any(|(&a, &b)| {
+                        (0..4).any(|i| {
+                            segment_distance(a, b, corners[i], corners[(i + 1) % 4]) < 1e-9
+                        })
+                    });
+        }
         if polygon.len() < 3 || self.modeled_samples.is_empty() {
             return false;
         }
@@ -24,6 +37,24 @@ impl StrokeRecord {
     }
 
     pub fn bounds(&self) -> Rect {
+        if let Some(corners) = self.annotation_corners() {
+            return corners.iter().fold(
+                Rect::new(
+                    f64::INFINITY,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::NEG_INFINITY,
+                ),
+                |bounds, p| {
+                    Rect::new(
+                        bounds.min.x.min(p.x),
+                        bounds.min.y.min(p.y),
+                        bounds.max.x.max(p.x),
+                        bounds.max.y.max(p.y),
+                    )
+                },
+            );
+        }
         let mut bounds = Rect::new(
             f64::INFINITY,
             f64::INFINITY,
@@ -42,6 +73,13 @@ impl StrokeRecord {
 
     /// Swept disk: sparse pointer samples must still erase crossed objects.
     pub fn hit_segment(&self, from: Point, to: Point, radius: f64) -> bool {
+        if let Some(corners) = self.annotation_corners() {
+            return point_in_polygon(from, &corners)
+                || point_in_polygon(to, &corners)
+                || (0..4).any(|i| {
+                    segment_distance(from, to, corners[i], corners[(i + 1) % 4]) <= radius
+                });
+        }
         let bounds = self.bounds();
         if from.x.min(to.x) - radius > bounds.max.x
             || from.x.max(to.x) + radius < bounds.min.x

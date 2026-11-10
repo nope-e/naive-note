@@ -132,6 +132,12 @@ pub enum PathCommand {
 pub struct StrokeRecord {
     pub id: Uuid,
     pub page_index: u32,
+    /// Informational only: object deletion and rigid transforms never require
+    /// verified private capture data. Standard annotations use their current AP.
+    #[serde(skip, default = "super::annotation::verified_by_default")]
+    pub edit_data_verified: bool,
+    #[serde(skip)]
+    pub pdf_annotation: Option<std::sync::Arc<super::PdfAnnotationSource>>,
     pub raw_samples: Vec<RawSample>,
     /// Captured raw points are immutable; modeled points and outline are already
     /// in edited paper coordinates. Legacy version-1 records use identity.

@@ -58,6 +58,7 @@ pub(super) struct DocumentActions {
     pub smoothing: bool,
     pub recovery_count: usize,
     pub selected_count: usize,
+    pub selected_unverified_count: usize,
 }
 
 pub(super) struct ToolbarContext<'a> {

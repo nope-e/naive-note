@@ -1,5 +1,6 @@
 //! MuPDF stays on one worker; only owned metadata and pixels cross threads.
 
+mod annotations;
 mod backend;
 mod cache;
 mod edit_data;
@@ -39,7 +40,8 @@ pub struct LoadedPdf {
     pub pages: Vec<PageGeometry>,
     pub first_page: Arc<PageBitmap>,
     pub edit_data_status: String,
-    /// Verified native ink, omitted from preview bitmaps and drawn as editable objects.
+    /// Native ink and current standard annotations, omitted from preview bitmaps
+    /// and drawn as objects. Verification is informational, never an edit gate.
     pub strokes: Vec<Arc<StrokeRecord>>,
     pub reference_lines: Option<ReferenceLayer>,
     pub rendered_reference_lines: crate::document::ReferenceLines,

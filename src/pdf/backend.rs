@@ -27,6 +27,8 @@ pub(super) struct PdfSession {
     reference_lines: ReferenceLines,
     edit_data: Option<super::edit_data::EditData>,
     edit_data_status: String,
+    objects: Vec<Arc<crate::document::StrokeRecord>>,
+    annotation_sources: Vec<Arc<crate::document::PdfAnnotationSource>>,
 }
 
 struct PreparedPage {
@@ -64,15 +66,20 @@ impl PdfSession {
         ensure!(document.page_count()? > 0, "PDF has no pages");
         // Our saved reference vectors are displayed as a live overlay instead.
         // Keep `base` intact for lossless source preservation during saves.
-        super::reference_lines::remove(&document)?;
         let mut pages = Vec::new();
         for index in 0..document.page_count()? {
             let page = PdfPage::try_from(document.load_page(index)?)
                 .with_context(|| format!("Cannot load PDF page {}", index + 1))?;
             pages.push(page_geometry(&page)?);
         }
-        let edit_data_status = super::save::edit_data_status(&document);
-        let edit_data = super::save::read_edit_data(&document).ok().flatten();
+        let (edit_data, mut edit_data_status) = super::save::load_edit_data(&document);
+        if edit_data
+            .as_ref()
+            .and_then(|data| data.reference_lines)
+            .is_some()
+        {
+            super::reference_lines::remove(&document)?;
+        }
         let reference_lines = edit_data
             .as_ref()
             .and_then(|data| data.reference_lines)
@@ -83,8 +90,13 @@ impl PdfSession {
                 },
                 |layer| layer.lines,
             );
-        if let Some(data) = &edit_data {
-            super::save::remove_editable_ink(&document, data)?;
+        let (objects, annotation_sources) =
+            super::annotations::load_objects(&document, edit_data.as_ref())?;
+        if !annotation_sources.is_empty() {
+            edit_data_status.push_str(&format!(
+                "; {} unverified standard annotation(s)",
+                annotation_sources.len()
+            ));
         }
         Ok(Self {
             base: bytes.into(),
@@ -94,11 +106,17 @@ impl PdfSession {
             reference_lines,
             edit_data,
             edit_data_status,
+            objects,
+            annotation_sources,
         })
     }
 
     pub fn base(&self) -> &[u8] {
         &self.base
+    }
+
+    pub fn annotation_sources(&self) -> &[Arc<crate::document::PdfAnnotationSource>] {
+        &self.annotation_sources
     }
 
     pub fn set_reference_lines(&mut self, lines: ReferenceLines) {
@@ -119,12 +137,7 @@ impl PdfSession {
             page_count: self.pages.len() as u32,
             pages: self.pages.clone(),
             edit_data_status: self.edit_data_status.clone(),
-            strokes: self.edit_data.as_ref().map_or_else(Vec::new, |data| {
-                data.strokes
-                    .iter()
-                    .map(|s| Arc::new(s.stroke.clone()))
-                    .collect()
-            }),
+            strokes: self.objects.clone(),
             reference_lines: self
                 .edit_data
                 .as_ref()

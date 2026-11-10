@@ -13,6 +13,7 @@ pub(super) fn draw(
     viewport: CanvasViewport,
     image: Option<&Image>,
     tile_images: &[Image],
+    annotation_images: &mut super::annotations::AnnotationImages,
 ) {
     let top_left = viewport.logical_to_physical(viewport.logical.min);
     let bottom_right = viewport.logical_to_physical(viewport.logical.max);
@@ -118,7 +119,7 @@ pub(super) fn draw(
             canvas.save();
             apply_transform(canvas, transform);
         }
-        draw_stroke(canvas, stroke);
+        draw_stroke(canvas, stroke, annotation_images, scale * dpi);
         if transform.is_some() {
             canvas.restore();
         }
@@ -127,7 +128,7 @@ pub(super) fn draw(
         canvas.save();
         apply_transform(canvas, preview.transform);
         for stroke in &preview.strokes {
-            draw_stroke(canvas, stroke);
+            draw_stroke(canvas, stroke, annotation_images, scale * dpi);
         }
         canvas.restore();
     }
@@ -177,7 +178,19 @@ pub(super) fn draw(
     canvas.restore();
 }
 
-fn draw_stroke(canvas: &Canvas, stroke: &StrokeRecord) {
+fn draw_stroke(
+    canvas: &Canvas,
+    stroke: &StrokeRecord,
+    annotation_images: &mut super::annotations::AnnotationImages,
+    density: f32,
+) {
+    if stroke.pdf_annotation.is_some() {
+        canvas.save();
+        apply_transform(canvas, stroke.edit_transform);
+        annotation_images.draw(canvas, stroke, density);
+        canvas.restore();
+        return;
+    }
     draw_outline(canvas, stroke.outline.iter(), &stroke.style);
 }
 

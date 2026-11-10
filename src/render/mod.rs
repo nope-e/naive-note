@@ -1,5 +1,6 @@
 //! Shared-context composition: UI layout -> Skia -> egui -> swap.
 
+mod annotations;
 mod draft_paper;
 mod fonts;
 mod page;

@@ -24,6 +24,7 @@ pub(super) struct SkiaRenderer {
     surface: Option<Surface>,
     page_images: HashMap<u32, (Arc<PageBitmap>, Image)>,
     tile_images: HashMap<TileKey, (Arc<PageTile>, Image)>,
+    annotation_images: super::annotations::AnnotationImages,
     context: DirectContext,
     size: PhysicalSize<u32>,
     samples: usize,
@@ -42,6 +43,7 @@ impl SkiaRenderer {
             surface: None,
             page_images: HashMap::new(),
             tile_images: HashMap::new(),
+            annotation_images: Default::default(),
             context,
             size: PhysicalSize::new(0, 0),
             samples: usize::from(window.config.num_samples()),
@@ -150,6 +152,7 @@ impl SkiaRenderer {
                     scene.viewport,
                     self.page_images.get(&page.index).map(|(_, image)| image),
                     &tile_images,
+                    &mut self.annotation_images,
                 );
             }
         }
@@ -167,6 +170,7 @@ impl Drop for SkiaRenderer {
         self.surface = None;
         self.page_images.clear();
         self.tile_images.clear();
+        self.annotation_images = Default::default();
         // Release while the GL context is still current, including on initialization errors.
         // This also follows rust-skia's recommended shutdown for AMD drivers.
         self.context.release_resources_and_abandon();

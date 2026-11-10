@@ -55,6 +55,8 @@ pub fn pressure_stroke(page: PageGeometry) -> Result<StrokeRecord> {
     Ok(StrokeRecord {
         id: Uuid::new_v4(),
         page_index: 0,
+        edit_data_verified: true,
+        pdf_annotation: None,
         raw_samples,
         edit_transform: Default::default(),
         modeled_samples,

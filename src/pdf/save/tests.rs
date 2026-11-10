@@ -1,9 +1,12 @@
 //! Structural PDF/CBOR checks only. No rendering, pixels, windows or viewers.
 
+mod external_edits;
+
 use std::path::PathBuf;
 
 use super::*;
 use crate::ink::test_support::pressure_stroke;
+use crate::pdf::edit_data::MAX_EDIT_BYTES;
 
 #[test]
 fn moved_saved_objects_change_pdf_page_and_reopen_without_old_annotations() {
@@ -685,7 +688,9 @@ fn external_changes_to_id_centerline_rectangle_flags_and_appearance_invalidate_e
             _ => unreachable!(),
         }
         assert!(read_edit_data(&document).is_err(), "{key}");
-        assert!(edit_data_status(&document).starts_with("Edit data ignored:"));
+        let (data, status) = load_edit_data(&document);
+        assert!(data.unwrap().strokes.is_empty());
+        assert!(status.contains("1 deleted or changed stroke(s) skipped"));
         assert_eq!(document.page_count().unwrap(), 2);
     }
 }
@@ -719,7 +724,11 @@ fn missing_corrupt_or_future_edit_data_does_not_block_pdf_parsing() {
         if variant == "missing" {
             assert!(read_edit_data(&reopened).unwrap().is_none());
         } else {
-            assert!(edit_data_status(&reopened).starts_with("Edit data ignored:"));
+            assert!(
+                load_edit_data(&reopened)
+                    .1
+                    .starts_with("Edit data ignored:")
+            );
         }
     }
 }
