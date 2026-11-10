@@ -164,19 +164,22 @@ fn pressure_curve(ui: &mut egui::Ui, current: f64, action: &mut Option<ToolbarAc
 
     // A ComboBox uses the same global popup slot as the settings panel. A submenu
     // has its own state, so opening it does not replace its parent popup.
-    SubMenu::new()
-        .config(MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside))
-        .show(ui, &response, |ui| {
-            ui.set_min_width(148.0);
-            for (label, gamma) in CURVES {
-                if ui
-                    .selectable_label((gamma - current).abs() < 1e-9, label)
-                    .clicked()
-                {
-                    *action = Some(ToolbarAction::PressureGamma(gamma));
-                    ui.data_mut(|data| data.insert_temp(close_id, true));
-                    ui.request_repaint();
+    // SubMenu opens on hover by default; only let it run after a click or while open.
+    if response.clicked() || open {
+        SubMenu::new()
+            .config(MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside))
+            .show(ui, &response, |ui| {
+                ui.set_min_width(148.0);
+                for (label, gamma) in CURVES {
+                    if ui
+                        .selectable_label((gamma - current).abs() < 1e-9, label)
+                        .clicked()
+                    {
+                        *action = Some(ToolbarAction::PressureGamma(gamma));
+                        ui.data_mut(|data| data.insert_temp(close_id, true));
+                        ui.request_repaint();
+                    }
                 }
-            }
-        });
+            });
+    }
 }

@@ -2,8 +2,6 @@
 
 use super::{PageGeometry, Point, Rect, Size};
 
-const PAGE_GAP: f64 = 24.0;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LayoutPage {
     pub index: u32,
@@ -32,7 +30,7 @@ impl PageLayout {
                 let size = geometry.paper_size();
                 let left = (width - size.width) * 0.5;
                 let bounds = Rect::new(left, top, left + size.width, top + size.height);
-                top += size.height + PAGE_GAP;
+                top += size.height;
                 LayoutPage {
                     index: index as u32,
                     geometry,
@@ -42,7 +40,7 @@ impl PageLayout {
             .collect();
         Self {
             pages,
-            size: Size::new(width, top - PAGE_GAP),
+            size: Size::new(width, top),
         }
     }
 
@@ -65,17 +63,10 @@ impl PageLayout {
     }
 
     pub fn nearest(&self, point: Point) -> usize {
-        let next = self
-            .pages
-            .partition_point(|page| page.bounds.max.y < point.y);
-        let next = next.min(self.pages.len() - 1);
-        if next > 0 && point.y < self.pages[next].bounds.min.y {
-            let previous = self.pages[next - 1].bounds.max.y;
-            if point.y - previous < self.pages[next].bounds.min.y - point.y {
-                return next - 1;
-            }
-        }
-        next
+        // Adjacent pages share an edge; assign that edge to the following page.
+        self.pages
+            .partition_point(|page| page.bounds.max.y <= point.y)
+            .min(self.pages.len() - 1)
     }
 
     pub fn hit_test(&self, point: Point) -> Option<&LayoutPage> {
@@ -97,18 +88,18 @@ mod tests {
     }
 
     #[test]
-    fn mixed_pages_are_centered_separated_and_culled() {
+    fn mixed_pages_are_centered_connected_and_culled() {
         let layout = layout();
         assert_eq!(layout.pages[0].bounds, Rect::new(50.0, 0.0, 350.0, 450.0));
-        assert_eq!(layout.pages[1].bounds, Rect::new(0.0, 474.0, 400.0, 1274.0));
-        assert_eq!(layout.size(), Size::new(400.0, 1274.0));
+        assert_eq!(layout.pages[1].bounds, Rect::new(0.0, 450.0, 400.0, 1250.0));
+        assert_eq!(layout.size(), Size::new(400.0, 1250.0));
         assert_eq!(
             layout.visible(Rect::new(0.0, 440.0, 400.0, 490.0)).count(),
             2
         );
         assert_eq!(
             layout.visible(Rect::new(0.0, 450.0, 400.0, 474.0)).count(),
-            0
+            1
         );
         assert_eq!(
             layout.visible(Rect::new(401.0, 0.0, 500.0, 1400.0)).count(),
@@ -117,9 +108,11 @@ mod tests {
     }
 
     #[test]
-    fn gaps_and_margins_do_not_hit_a_page() {
+    fn shared_edges_hit_the_following_page_and_margins_do_not_hit() {
         let layout = layout();
-        assert!(layout.hit_test(Point::new(200.0, 460.0)).is_none());
+        assert_eq!(layout.hit_test(Point::new(200.0, 449.9)).unwrap().index, 0);
+        assert_eq!(layout.hit_test(Point::new(10.0, 450.0)).unwrap().index, 1);
+        assert_eq!(layout.hit_test(Point::new(200.0, 460.0)).unwrap().index, 1);
         assert!(layout.hit_test(Point::new(10.0, 100.0)).is_none());
         assert_eq!(layout.nearest(Point::new(0.0, -1000.0)), 0);
         assert_eq!(layout.nearest(Point::new(0.0, 10000.0)), 1);

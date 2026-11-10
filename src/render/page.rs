@@ -155,10 +155,13 @@ pub(super) fn draw(
     }
     canvas.restore();
 
+    // Touching pages share this gray edge. Disable antialiasing so the shared
+    // border stays a single solid logical pixel instead of blending twice.
     paint
+        .set_anti_alias(false)
         .set_style(Style::Stroke)
         .set_stroke_width(1.0 / scale)
-        .set_color(Color::from_rgb(0xD9, 0xDC, 0xE2));
+        .set_color(Color::from_rgb(0xB8, 0xBC, 0xC4));
     canvas.draw_rect(paper, &paint);
     if scene.draft_paper {
         paint.set_color(Color::from_rgb(0x38, 0xA0, 0x73));
