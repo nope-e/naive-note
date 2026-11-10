@@ -49,6 +49,11 @@ pub(super) fn show(
                         changed |= ui.checkbox(&mut layer.embed_in_pdf, "保存时将参考线写入 PDF 页面").changed();
                         ui.label(egui::RichText::new("关闭时仅在应用内叠加；保存仍会记录文档设置。").small().color(theme::MUTED));
                         if ui.button("采用全局参考线样式").clicked() { layer.lines = state.settings.reference_lines; changed = true; }
+                        ui.add_space(20.0);
+                        ui.separator();
+                        widgets::section(ui, "自动加页");
+                        changed |= ui.checkbox(&mut layer.auto_expand, "末尾提示线与自动加页").changed();
+                        auto_expand_hint(ui);
                         if changed { *action = Some(ToolbarAction::DocumentReference(layer)); }
                     });
                 } else {
@@ -65,10 +70,17 @@ pub(super) fn show(
                     ui.add_space(20.0);
                     ui.separator();
                     widgets::section(ui, "默认参考线");
-                    ui.label(egui::RichText::new("用于新建文档和没有参考线元数据的 PDF。已有元数据的文档使用自己的设置。").small().color(theme::MUTED));
+                    ui.label(egui::RichText::new("用于新建文档；普通导入 PDF 默认关闭。保存过设置的文档沿用自身设置。").small().color(theme::MUTED));
                     ui.add_space(10.0);
                     let mut lines = state.settings.reference_lines;
                     if editor(ui, &mut lines) { *action = Some(ToolbarAction::GlobalReference(lines)); }
+                    ui.add_space(20.0);
+                    ui.separator();
+                    widgets::section(ui, "默认自动加页");
+                    let mut auto_expand = state.settings.auto_expand;
+                    if ui.checkbox(&mut auto_expand, "末尾提示线与自动加页").changed() { *action = Some(ToolbarAction::GlobalAutoExpand(auto_expand)); }
+                    auto_expand_hint(ui);
+                    ui.label(egui::RichText::new("启用规则同参考线：新建文档采用全局默认，普通导入 PDF 默认关闭，已保存文档沿用自身设置。").small().color(theme::MUTED));
                     ui.add_space(20.0);
                     ui.separator();
                     widgets::section(ui, "自动保存");
@@ -84,6 +96,16 @@ pub(super) fn show(
                 }
             });
         });
+}
+
+fn auto_expand_hint(ui: &mut egui::Ui) {
+    ui.label(
+        egui::RichText::new(
+            "末页距底边 1/16 页高处显示虚线，书写越线自动追加同尺寸页面；提示线仅在应用内显示。",
+        )
+        .small()
+        .color(theme::MUTED),
+    );
 }
 
 fn cursor_editor(ui: &mut egui::Ui, label: &str, style: &mut crate::cursor::CursorStyle) {

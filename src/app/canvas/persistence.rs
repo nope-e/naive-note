@@ -176,6 +176,8 @@ impl super::CanvasWorkspace {
                     self.persistence.settings = settings;
                     self.document
                         .set_global_reference(self.persistence.settings.reference_lines);
+                    self.document
+                        .set_global_auto_expand(self.persistence.settings.auto_expand);
                 }
                 self.persistence.recovery_open = !drafts.is_empty();
                 if self.persistence.recovery_open {

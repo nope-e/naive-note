@@ -39,6 +39,7 @@ pub(super) struct CanvasDocument {
     document_id: uuid::Uuid,
     saving: saving::SavingState,
     global_reference: ReferenceLines,
+    global_auto_expand: bool,
     reference_metadata: Option<ReferenceLayer>,
 }
 
@@ -64,6 +65,7 @@ impl CanvasDocument {
             document_id: uuid::Uuid::new_v4(),
             saving: saving::SavingState::default(),
             global_reference: ReferenceLines::default(),
+            global_auto_expand: true,
             reference_metadata: None,
         }
     }
@@ -184,6 +186,10 @@ impl CanvasDocument {
         self.global_reference = lines;
     }
 
+    pub fn set_global_auto_expand(&mut self, enabled: bool) {
+        self.global_auto_expand = enabled;
+    }
+
     pub fn reference_layer(&self) -> ReferenceLayer {
         self.edits
             .reference_lines
@@ -198,6 +204,7 @@ impl CanvasDocument {
                     self.global_reference
                 },
                 embed_in_pdf: !self.is_loaded(),
+                auto_expand: !self.is_loaded() && self.global_auto_expand,
             })
     }
 
@@ -427,10 +434,14 @@ impl CanvasDocument {
         scene: &mut CanvasScene,
         current_page: u32,
     ) {
-        let reference_lines = self.reference_layer().lines;
+        let layer = self.reference_layer();
+        let reference_lines = layer.lines;
         for page in &mut scene.pages {
             page.strokes = self.edits.strokes(page.index).to_vec();
             page.reference_lines = reference_lines;
+            if !layer.auto_expand {
+                page.page_end_y = None;
+            }
         }
         if let Some(loaded) = self.loaded.as_mut() {
             loaded.preview.update(

@@ -41,6 +41,7 @@ pub(super) enum ToolbarAction {
     Width(f64),
     PressureGamma(f64),
     GlobalReference(crate::document::ReferenceLines),
+    GlobalAutoExpand(bool),
     DocumentReference(crate::document::ReferenceLayer),
     View(ViewAction),
 }

@@ -53,6 +53,14 @@ pub struct ReferenceLayer {
     pub lines: ReferenceLines,
     /// Include ordinary vector page content for other PDF readers and printing.
     pub embed_in_pdf: bool,
+    /// Show the last-page guide and append paper while writing past it.
+    /// This aid is stored in edit metadata only, never in PDF page content.
+    #[serde(default = "default_auto_expand")]
+    pub auto_expand: bool,
+}
+
+fn default_auto_expand() -> bool {
+    true
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

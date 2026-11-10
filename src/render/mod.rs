@@ -43,6 +43,7 @@ pub struct PageScene {
     pub selection_rect: Option<crate::document::Rect>,
     pub draft_paper: bool,
     pub reference_lines: crate::document::ReferenceLines,
+    pub page_end_y: Option<f64>,
 }
 
 pub struct Renderer {

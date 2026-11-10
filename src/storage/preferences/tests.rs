@@ -169,11 +169,13 @@ fn partial_json_settings_receive_defaults_and_new_defaults_survive_roundtrip() {
     fs::write(&path, br#"{"version":1,"autosave_seconds":7}"#).unwrap();
     let settings = read_settings(&path).unwrap();
     assert_eq!(settings.autosave_seconds, 7);
+    assert!(settings.auto_expand);
     assert_eq!(
         settings.reference_lines,
         crate::document::ReferenceLines::default()
     );
     let changed = Settings {
+        auto_expand: false,
         reference_lines: crate::document::ReferenceLines {
             pattern: crate::document::ReferencePattern::None,
             width: 32.0,

@@ -109,9 +109,15 @@ impl CanvasView {
                 page
             })
             .collect();
+        let appending =
+            pages.len() > self.original_pages.len() && pages.starts_with(&self.original_pages);
         self.original_pages = pages;
         self.layout = PageLayout::new(&displayed);
-        self.go_to_page(self.current as u32);
+        // Auto-expansion happens during a stroke: keep its frozen mapping aligned
+        // with the page on screen. Explicit page navigation still positions it.
+        if !appending {
+            self.go_to_page(self.current as u32);
+        }
     }
 
     pub fn go_to_page(&mut self, index: u32) {
@@ -263,6 +269,8 @@ impl CanvasView {
                 selection_rect: None,
                 draft_paper,
                 reference_lines: crate::document::ReferenceLines::default(),
+                page_end_y: (page.index + 1 == self.page_count())
+                    .then(|| page.geometry.paper_size().height * (15.0 / 16.0)),
             })
             .collect()
     }
@@ -292,5 +300,20 @@ impl CanvasView {
             view: self.transform.for_page(page.bounds.min),
             viewport,
         })
+    }
+
+    /// Actual ink is in the original page orientation; the guide follows the
+    /// displayed bottom edge, including temporary reading rotation.
+    pub fn ink_past_page_end(&self, index: u32, position: Point) -> bool {
+        if index + 1 != self.page_count() {
+            return false;
+        }
+        let page = self.layout.pages()[index as usize].geometry;
+        let original = self.original_pages[index as usize];
+        let position = page.pdf_to_paper(original.paper_to_pdf(position));
+        let size = page.paper_size();
+        position.is_finite()
+            && (0.0..=size.width).contains(&position.x)
+            && position.y > size.height * (15.0 / 16.0)
     }
 }

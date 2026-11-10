@@ -17,6 +17,7 @@ fn serialize(
         ReferenceLayer {
             lines: crate::document::ReferenceLines::default(),
             embed_in_pdf: false,
+            auto_expand: true,
         },
         &[],
     )
@@ -255,6 +256,7 @@ fn draft_serializes_its_original_paper_geometry_and_configurable_background() {
         ReferenceLayer {
             lines: crate::document::ReferenceLines::default(),
             embed_in_pdf: true,
+            auto_expand: true,
         },
         &[],
     )
@@ -758,6 +760,7 @@ fn appended_pages_preserve_mixed_source_content_and_last_page_geometry_without_c
                 ..ReferenceLines::default()
             },
             embed_in_pdf: false,
+            auto_expand: true,
         };
         let mut stroke = pressure_stroke(geometry).unwrap();
         stroke.page_index = 2;
@@ -839,6 +842,7 @@ fn reference_vectors_roundtrip_replace_without_duplicates_and_preserve_source_co
                     color_rgb: [120, 150, 180],
                 },
                 embed_in_pdf: true,
+                auto_expand: true,
             };
             let (bytes, data) =
                 serialize_with_reference(&base, &[], Uuid::new_v4(), layer, &[]).unwrap();
@@ -908,6 +912,58 @@ fn legacy_edit_attachment_without_reference_metadata_uses_the_fallback() {
             ..crate::document::ReferenceLines::default()
         },
         embed_in_pdf: false,
+        auto_expand: true,
     });
     assert!(EditData::decode(&invalid.encode().unwrap()).is_err());
+}
+
+#[test]
+fn auto_expansion_choice_roundtrips_only_in_metadata_and_legacy_layers_enable_it() {
+    use crate::document::{ReferenceLines, ReferencePattern};
+    let base = fixture(0);
+    let source = PdfDocument::from_bytes(&base).unwrap();
+    for auto_expand in [false, true] {
+        let layer = ReferenceLayer {
+            lines: ReferenceLines {
+                pattern: ReferencePattern::None,
+                ..ReferenceLines::default()
+            },
+            embed_in_pdf: true,
+            auto_expand,
+        };
+        let (bytes, data) =
+            serialize_with_reference(&base, &[], Uuid::new_v4(), layer, &[]).unwrap();
+        assert_eq!(data.reference_lines, Some(layer));
+        let saved = PdfDocument::from_bytes(&bytes).unwrap();
+        assert_eq!(
+            read_edit_data(&saved).unwrap().unwrap().reference_lines,
+            Some(layer)
+        );
+        for index in 0..saved.page_count().unwrap() {
+            assert!(
+                page_content(&saved, index, true).is_empty(),
+                "the guide must never be exported"
+            );
+            assert_eq!(
+                page_content(&saved, index, false),
+                page_content(&source, index, false)
+            );
+        }
+    }
+    #[derive(serde::Serialize)]
+    struct LegacyLayer {
+        lines: ReferenceLines,
+        embed_in_pdf: bool,
+    }
+    let mut cbor = Vec::new();
+    ciborium::into_writer(
+        &LegacyLayer {
+            lines: ReferenceLines::default(),
+            embed_in_pdf: true,
+        },
+        &mut cbor,
+    )
+    .unwrap();
+    let layer: ReferenceLayer = ciborium::from_reader(cbor.as_slice()).unwrap();
+    assert!(layer.auto_expand);
 }

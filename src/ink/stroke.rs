@@ -32,6 +32,13 @@ pub struct LiveStroke {
 }
 
 impl LiveStroke {
+    pub fn last_ink_sample(&self) -> Option<(u32, Point)> {
+        self.record
+            .raw_samples
+            .last()
+            .map(|sample| (self.record.page_index, sample.position))
+    }
+
     pub fn new(target: StrokeTarget, smoothing: bool, style: PenStyle) -> Self {
         let modeler = smoothing.then(InkModeler::new);
         let processing = modeler

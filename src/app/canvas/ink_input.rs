@@ -119,6 +119,10 @@ impl CanvasInput {
         self.active.as_ref().map(LiveStroke::snapshot)
     }
 
+    pub fn last_ink_sample(&self) -> Option<(u32, Point)> {
+        self.active.as_ref().and_then(LiveStroke::last_ink_sample)
+    }
+
     pub fn cancel(&mut self) {
         self.cancel_object();
         self.active = None;

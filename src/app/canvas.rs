@@ -5,6 +5,7 @@ mod document;
 mod ink_input;
 mod new_document;
 mod object_editing;
+mod page_expansion;
 mod pdf_preview;
 mod persistence;
 mod scrollbars;
@@ -255,6 +256,7 @@ impl CanvasWorkspace {
         let (ui_owned, stroke) =
             self.input
                 .pen(event.sample, &mut self.view, can_ink, event.modifiers);
+        self.expand_for_ink(stroke.as_deref());
         if let Some(stroke) = stroke {
             self.document.add_stroke(stroke);
         }
@@ -275,6 +277,7 @@ impl CanvasWorkspace {
         let (owned, stroke) =
             self.input
                 .mouse_button(down, position, &mut self.view, can_ink, modifiers);
+        self.expand_for_ink(stroke.as_deref());
         if let Some(stroke) = stroke {
             self.document.add_stroke(stroke);
         }
@@ -283,7 +286,9 @@ impl CanvasWorkspace {
     }
 
     pub fn mouse_move(&mut self, position: Point, modifiers: egui::Modifiers) {
-        if let Some(stroke) = self.input.mouse_move(position, &mut self.view, modifiers) {
+        let stroke = self.input.mouse_move(position, &mut self.view, modifiers);
+        self.expand_for_ink(stroke.as_deref());
+        if let Some(stroke) = stroke {
             self.document.add_stroke(stroke);
         }
         self.flush_object_events();
@@ -389,6 +394,12 @@ impl CanvasWorkspace {
                 Some(ToolbarAction::GlobalReference(lines)) => {
                     self.persistence.settings.reference_lines = lines;
                     self.document.set_global_reference(lines);
+                    self.persist_settings();
+                    action = None;
+                }
+                Some(ToolbarAction::GlobalAutoExpand(enabled)) => {
+                    self.persistence.settings.auto_expand = enabled;
+                    self.document.set_global_auto_expand(enabled);
                     self.persist_settings();
                     action = None;
                 }

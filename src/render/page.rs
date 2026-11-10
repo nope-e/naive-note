@@ -163,7 +163,20 @@ pub(super) fn draw(
         .set_stroke_width(1.0 / scale)
         .set_color(Color::from_rgb(0xB8, 0xBC, 0xC4));
     canvas.draw_rect(paper, &paint);
+    if let Some(y) = scene.page_end_y {
+        paint
+            .set_anti_alias(true)
+            .set_stroke_width(1.25 / scale)
+            .set_color(Color::from_rgb(0xCD, 0x83, 0x34))
+            .set_path_effect(skia_safe::PathEffect::dash(
+                &[6.0 / scale, 4.0 / scale],
+                0.0,
+            ));
+        canvas.draw_line((0.0, y as f32), (paper.width(), y as f32), &paint);
+        paint.set_path_effect(None);
+    }
     if scene.draft_paper {
+        paint.set_stroke_width(1.0 / scale);
         paint.set_color(Color::from_rgb(0x38, 0xA0, 0x73));
         let r = 5.0 / scale;
         canvas.draw_line((-r, -r), (r, r), &paint);

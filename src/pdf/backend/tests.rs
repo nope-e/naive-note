@@ -353,6 +353,7 @@ fn worker_saves_snapshot_and_keeps_the_immutable_preview_session_available() {
             reference_lines: crate::document::ReferenceLayer {
                 lines: crate::document::ReferenceLines::default(),
                 embed_in_pdf: true,
+                auto_expand: true,
             },
             document_id: uuid::Uuid::new_v4(),
             path: directory.join("saved.pdf"),
@@ -434,6 +435,7 @@ fn saving_a_closed_session_returns_an_error_without_creating_output() {
             reference_lines: crate::document::ReferenceLayer {
                 lines: crate::document::ReferenceLines::default(),
                 embed_in_pdf: true,
+                auto_expand: true,
             },
             document_id: uuid::Uuid::new_v4(),
             path: output.clone(),
@@ -604,6 +606,7 @@ fn pdf_reference_settings_default_to_none_and_restore_saved_document_settings() 
                     ..ReferenceLines::default()
                 },
                 embed_in_pdf,
+                auto_expand: true,
             };
             let (bytes, _) = super::super::save::serialize_with_reference(
                 &source,
@@ -633,6 +636,7 @@ fn saved_reference_vectors_are_removed_only_from_the_live_render_document() {
     let layer = ReferenceLayer {
         lines: ReferenceLines::default(),
         embed_in_pdf: true,
+        auto_expand: true,
     };
     let (bytes, _) = super::super::save::serialize_with_reference(
         &source,
@@ -730,6 +734,7 @@ fn reopened_display_list_keeps_foreign_ink_and_moves_verified_ink_to_editable_ov
             ReferenceLayer {
                 lines,
                 embed_in_pdf: true,
+                auto_expand: true,
             },
             &[],
         )

@@ -64,6 +64,45 @@ fn fixture_pdf() -> LoadedPdf {
     }
 }
 
+#[test]
+fn auto_expansion_uses_new_document_defaults_and_saved_overrides_but_not_plain_pdf() {
+    let mut doc = document();
+    assert!(doc.reference_layer().auto_expand);
+    doc.set_global_auto_expand(false);
+    assert!(!doc.reference_layer().auto_expand);
+    let mut layer = doc.reference_layer();
+    layer.auto_expand = true;
+    doc.set_reference_layer(layer);
+    assert!(doc.reference_layer().auto_expand);
+    doc.undo();
+    assert!(!doc.reference_layer().auto_expand);
+    doc.redo();
+    assert!(doc.reference_layer().auto_expand);
+
+    doc.pending = Some(10);
+    doc.opened(OpenResponse {
+        request: 10,
+        result: Ok(fixture_pdf()),
+    });
+    doc.set_global_auto_expand(true);
+    assert!(
+        !doc.reference_layer().auto_expand,
+        "plain imported PDFs opt in explicitly"
+    );
+    let mut saved = fixture_pdf();
+    saved.reference_lines = Some(layer);
+    doc.pending = Some(11);
+    doc.opened(OpenResponse {
+        request: 11,
+        result: Ok(saved),
+    });
+    doc.set_global_auto_expand(false);
+    assert!(
+        doc.reference_layer().auto_expand,
+        "saved document choice wins"
+    );
+}
+
 fn add(document: &mut CanvasDocument) {
     let stroke = crate::ink::test_support::pressure_stroke(fixture_pdf().pages[0]).unwrap();
     document.add_stroke(Arc::new(stroke));
@@ -363,7 +402,8 @@ fn global_reference_defaults_only_apply_to_new_documents_and_metadata_wins() {
         doc.reference_layer(),
         ReferenceLayer {
             lines,
-            embed_in_pdf: true
+            embed_in_pdf: true,
+            auto_expand: true,
         }
     );
     assert!(!doc.is_dirty());
@@ -378,6 +418,7 @@ fn global_reference_defaults_only_apply_to_new_documents_and_metadata_wins() {
             ..ReferenceLines::default()
         },
         embed_in_pdf: false,
+        auto_expand: false,
     };
     assert_eq!(doc.reference_layer(), disabled);
     assert!(!doc.reference_uses_global());
@@ -397,6 +438,7 @@ fn global_reference_defaults_only_apply_to_new_documents_and_metadata_wins() {
     let metadata = ReferenceLayer {
         lines: ReferenceLines::default(),
         embed_in_pdf: true,
+        auto_expand: true,
     };
     let mut pdf = fixture_pdf();
     pdf.reference_lines = Some(metadata);
@@ -413,7 +455,8 @@ fn global_reference_defaults_only_apply_to_new_documents_and_metadata_wins() {
         doc.reference_layer(),
         ReferenceLayer {
             lines,
-            embed_in_pdf: true
+            embed_in_pdf: true,
+            auto_expand: true,
         }
     );
     assert!(doc.reference_uses_global());
