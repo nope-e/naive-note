@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 description = "A local PDF handwriting application built with egui and Skia"
+# Original project code; distribution with MuPDF must also comply with AGPLv3.
+license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0"

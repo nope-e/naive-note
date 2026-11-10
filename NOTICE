@@ -1,0 +1,18 @@
+Naive Note
+Copyright 2026 __nop__
+
+Except where otherwise stated, original source code authored for this project
+is licensed under the Apache License, Version 2.0. See LICENSE.
+
+Third-party code and assets retain their respective licenses and notices.
+See THIRD_PARTY_NOTICES.md, licenses/, and assets/icons/lucide/LICENSE.
+
+The current application links MuPDF through the AGPL-3.0-licensed mupdf and
+mupdf-sys Rust crates. Unless separate permissions cover all relevant
+components, distribution of the combined application as a whole must comply
+with the GNU Affero General Public License, version 3, including providing
+the complete Corresponding Source under its terms and retaining the required
+license and attribution notices. The original project code retains its
+Apache-2.0 license within that combination.
+
+The AGPLv3 text is provided in licenses/MuPDF-AGPL-3.0.txt.

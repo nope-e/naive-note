@@ -4,6 +4,12 @@ Windows 本地 PDF 手写笔记应用。支持 MuPDF 连续纵向多页阅读、
 
 保存使用标准 Ink 批注、自定义压感外观和 CBOR＋Zstd 编辑附件，并在提交前回读校验。用户已确认多页阅读总体视觉及早期压力样本，正式保存的窗口交互、Edge、Acrobat 和打印的逐项结果仍待记录。
 
+## 许可证
+
+本项目原创代码采用 [Apache License 2.0](LICENSE)，许可范围见 [NOTICE](NOTICE)。第三方代码与资源保留各自的许可证和版权声明；Lucide 图标采用 ISC / MIT，详见[图标许可证](assets/icons/lucide/LICENSE)。
+
+当前应用通过 `mupdf` / `mupdf-sys` 静态链接 MuPDF。在未取得覆盖相关组件的另行授权时，包含这些依赖的完整应用须按 [AGPLv3](licenses/MuPDF-AGPL-3.0.txt) 的条件分发，包括按其条款向接收者提供完整对应源码、保留所需许可证及版权声明。原创代码在组合中继续保留 Apache-2.0 许可；完整应用的分发仍受 AGPLv3 约束。依赖来源和许可见[第三方依赖说明](THIRD_PARTY_NOTICES.md)。
+
 ## 工作区界面
 
 启动时显示打开 / 新建大弹窗，不再自动打开测试画布。左侧提供 PDF 拖入 / 文件选择入口和 A3、A4、A5、A6、B4、B5、Letter、Legal、Tabloid 纸张预设，右侧配置宽高、横竖方向、毫米 / 英寸 / 像素单位及 DPI，点击「创建文档」后进入画布。PDF 使用矢量纸张，DPI 用于像素尺寸换算，像素单位下参与计算实际纸张大小，不改变屏幕缩放；初始预选 A4、300 DPI。
