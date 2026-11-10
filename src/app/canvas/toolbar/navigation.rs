@@ -20,7 +20,8 @@ pub(super) fn show(
             theme::floating_frame().show(ui, |ui| {
                 ui.spacing_mut().item_spacing.x = 3.0;
                 ui.horizontal(|ui| {
-                    if icons::button(ui, Icon::Minus, "缩小", false, state.zoom > 0.1001).clicked()
+                    if icons::button(ui, Icon::Minus, "缩小 · Ctrl+-", false, state.zoom > 0.1001)
+                        .clicked()
                     {
                         *action = Some(ToolbarAction::View(ViewAction::Zoom(1.0 / 1.2)));
                     }
@@ -37,7 +38,8 @@ pub(super) fn show(
                         .width(216.0)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| super::menus::view_menu(ui, state, action));
-                    if icons::button(ui, Icon::Plus, "放大", false, state.zoom < 7.999).clicked()
+                    if icons::button(ui, Icon::Plus, "放大 · Ctrl+=", false, state.zoom < 7.999)
+                        .clicked()
                     {
                         *action = Some(ToolbarAction::View(ViewAction::Zoom(1.2)));
                     }

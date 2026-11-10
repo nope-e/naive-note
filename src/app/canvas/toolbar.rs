@@ -5,6 +5,7 @@ mod floating;
 mod global_settings;
 mod header;
 mod icons;
+mod keyboard_zoom;
 mod menus;
 mod navigation;
 mod settings;
@@ -85,7 +86,7 @@ impl WorkspaceToolbar {
         process_input: bool,
     ) -> Option<ToolbarAction> {
         let mut action = process_input
-            .then(|| shortcuts(ui, &context.document))
+            .then(|| shortcuts(ui, &context.document, context.zoom))
             .flatten();
         self.header(ui, context, &mut action, process_input);
         if !context.has_document || context.dialog_open {
@@ -153,7 +154,7 @@ impl WorkspaceToolbar {
     }
 }
 
-fn shortcuts(ui: &egui::Ui, document: &DocumentActions) -> Option<ToolbarAction> {
+fn shortcuts(ui: &egui::Ui, document: &DocumentActions, zoom: f64) -> Option<ToolbarAction> {
     let editing_text = ui.ctx().text_edit_focused();
     ui.input(|input| {
         if !editing_text
@@ -182,6 +183,10 @@ fn shortcuts(ui: &egui::Ui, document: &DocumentActions) -> Option<ToolbarAction>
             Some(ToolbarAction::Open)
         } else if document.can_close && input.modifiers.ctrl && input.key_pressed(egui::Key::W) {
             Some(ToolbarAction::Close)
+        } else if !editing_text
+            && let Some(factor) = keyboard_zoom::factor(&input.events, zoom)
+        {
+            Some(ToolbarAction::View(ViewAction::Zoom(factor)))
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::Num0) {
             Some(ToolbarAction::View(ViewAction::Fit))
         } else if input.modifiers.ctrl && input.key_pressed(egui::Key::Num1) {

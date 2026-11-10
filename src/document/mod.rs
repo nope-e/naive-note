@@ -15,4 +15,4 @@ pub use stroke::{
     ModeledSample, ModelerPreset, NativePenData, PathCommand, PenPhase, PenStyle,
     ProcessingSnapshot, RawSample, StrokeRecord,
 };
-pub use view::{CanvasViewport, ViewTransform};
+pub use view::{CanvasViewport, MAX_ZOOM, MIN_ZOOM, ViewTransform};
