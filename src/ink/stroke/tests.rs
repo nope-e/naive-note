@@ -38,6 +38,10 @@ fn highlighter_stationary_pressure_and_settling_do_not_accumulate_contours_and_r
         live.push(raw(PenPhase::Up, 240., 100., 11_600_000));
         let finished = live.finish().unwrap();
         assert_eq!(finished.raw_samples.len(), 2043);
+        assert_eq!(
+            finished.outline,
+            crate::ink::saved_outline_v1(&finished.modeled_samples, &finished.style)
+        );
         assert!(
             finished
                 .outline
@@ -115,6 +119,12 @@ fn smoothing_resamples_in_paper_space_and_preserves_raw_and_preset() {
     let direct = direct.finish().unwrap();
     assert_eq!(modeled.raw_samples, samples);
     assert_eq!(direct.raw_samples, samples);
+    for record in [&modeled, &direct] {
+        assert_eq!(
+            record.outline,
+            crate::ink::saved_outline_v1(&record.modeled_samples, &record.style)
+        );
+    }
     assert!(
         modeled
             .processing

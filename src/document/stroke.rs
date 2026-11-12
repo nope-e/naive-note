@@ -138,12 +138,16 @@ pub struct StrokeRecord {
     pub edit_data_verified: bool,
     #[serde(skip)]
     pub pdf_annotation: Option<std::sync::Arc<super::PdfAnnotationSource>>,
+    /// Retained during capture for modeler fallback. Compact edit attachments
+    /// omit capture data; object edits use the confirmed geometry below.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub raw_samples: Vec<RawSample>,
     /// Captured raw points are immutable; modeled points and outline are already
     /// in edited paper coordinates. Legacy version-1 records use identity.
     #[serde(default, skip_serializing_if = "InkTransform::is_identity")]
     pub edit_transform: InkTransform,
     pub modeled_samples: Vec<ModeledSample>,
+    #[serde(default)]
     pub outline: Vec<PathCommand>,
     pub style: PenStyle,
     pub processing: ProcessingSnapshot,

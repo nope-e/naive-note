@@ -7,6 +7,7 @@ mod target;
 
 #[cfg(test)]
 use outline::round_outline;
+pub(crate) use outline::saved_outline_v1;
 pub use stroke::{ActiveInk, LiveStroke};
 pub use target::StrokeTarget;
 

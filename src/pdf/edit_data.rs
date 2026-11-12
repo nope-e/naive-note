@@ -6,12 +6,37 @@ use uuid::Uuid;
 
 use crate::document::{ReferenceLayer, StrokeRecord};
 
-pub(super) const FORMAT_VERSION: u32 = 1;
+mod compact;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(super) const FORMAT_VERSION: u32 = 3;
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub(super) struct SavedStroke {
     pub stroke: StrokeRecord,
     pub annotation_sha256: String,
+}
+
+impl SavedStroke {
+    pub fn new(stroke: &StrokeRecord, annotation_sha256: String) -> Self {
+        Self {
+            // Capture samples are only needed while modeling a live stroke.
+            // Keep exact confirmed geometry, style and transform for later edits,
+            // without cloning or persisting the redundant device history.
+            stroke: StrokeRecord {
+                id: stroke.id,
+                page_index: stroke.page_index,
+                edit_data_verified: stroke.edit_data_verified,
+                pdf_annotation: None,
+                raw_samples: Vec::new(),
+                edit_transform: stroke.edit_transform,
+                modeled_samples: stroke.modeled_samples.clone(),
+                outline: stroke.outline.clone(),
+                style: stroke.style.clone(),
+                processing: stroke.processing.clone(),
+            },
+            annotation_sha256,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -30,11 +55,16 @@ impl EditData {
 
     pub fn encode(&self) -> Result<Vec<u8>> {
         // Stream CBOR into Zstd so large documents do not need an additional
-        // uncompressed copy of all capture samples and geometry during encoding.
+        // uncompressed copy of the confirmed geometry during encoding.
         let encoder = zstd::stream::write::Encoder::new(Vec::new(), 3)
             .context("Create Zstd edit data encoder")?;
         let mut writer = BufWriter::new(encoder);
-        ciborium::into_writer(self, &mut writer).context("Encode edit data as CBOR")?;
+        if self.format_version >= 3 {
+            ciborium::into_writer(&compact::EditDataRef::new(self), &mut writer)
+                .context("Encode compact edit data as CBOR")?;
+        } else {
+            ciborium::into_writer(self, &mut writer).context("Encode edit data as CBOR")?;
+        }
         let encoder = writer
             .into_inner()
             .map_err(|error| error.into_error())
@@ -51,7 +81,7 @@ impl EditData {
             "Trailing CBOR edit data"
         );
         ensure!(
-            data.format_version == FORMAT_VERSION,
+            (1..=FORMAT_VERSION).contains(&data.format_version),
             "Unsupported edit data version {}",
             data.format_version
         );

@@ -46,7 +46,9 @@ fn large_edit_data_saves_reopens_and_accepts_more_strokes() {
         })
         .collect();
     let document_id = Uuid::new_v4();
-    let (bytes, data) = serialize(&base, &strokes, document_id).unwrap();
+    // Legacy files can still contain large capture attachments. Read them in
+    // full, then migrate to compact geometry on the next save.
+    let (bytes, data) = super::compact_saves::legacy_serialize(&base, &strokes, document_id);
     let document = PdfDocument::from_bytes(&bytes).unwrap();
     let attachment = document
         .load_embedded_file(&data.filename())
@@ -75,6 +77,13 @@ fn large_edit_data_saves_reopens_and_accepts_more_strokes() {
     strokes.push(Arc::new(stroke_for(&base)));
     let (extended, expected) =
         serialize(&read_pdf(&output).unwrap(), &strokes, document_id).unwrap();
+    assert!(
+        expected
+            .strokes
+            .iter()
+            .all(|s| s.stroke.raw_samples.is_empty())
+    );
+    assert!(extended.len() < bytes.len() / 2);
     crate::storage::save_atomic(&output, Some(fingerprint), &extended, |path| {
         verify_data(&read_pdf(path)?, &expected)
     })

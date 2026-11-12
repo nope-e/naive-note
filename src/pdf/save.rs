@@ -10,7 +10,9 @@ use anyhow::{Context, Result, ensure};
 use mupdf::{
     Buffer,
     color::AnnotationColor,
-    pdf::{AnnotationFlags, EmbeddedFileOptions, PdfDocument, PdfObject, Permission},
+    pdf::{
+        AnnotationFlags, EmbeddedFileOptions, PdfDocument, PdfObject, PdfWriteOptions, Permission,
+    },
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -91,10 +93,6 @@ fn add_stroke(document: &mut PdfDocument, stroke: &StrokeRecord) -> Result<Saved
     annotation.set_border_width((stroke.style.max_width_pt / geometry.user_unit()) as f32)?;
     let mut object = annotation.object();
     object.dict_put("NM", PdfObject::new_string(&stroke.id.to_string())?)?;
-    object.dict_put(
-        "Contents",
-        PdfObject::new_string("Naive Note pressure stroke")?,
-    )?;
     // First clear MuPDF's pending appearance regeneration, then install the
     // final custom Form XObject. No semantic setter may run after this point.
     annotation.update()?;
@@ -131,10 +129,7 @@ fn add_stroke(document: &mut PdfDocument, stroke: &StrokeRecord) -> Result<Saved
         normal_appearance(&object)?.read_stream()? == contents.as_bytes(),
         "MuPDF replaced the pressure appearance during page update"
     );
-    Ok(SavedStroke {
-        stroke: stroke.clone(),
-        annotation_sha256: fingerprint(&object)?,
-    })
+    Ok(SavedStroke::new(stroke, fingerprint(&object)?))
 }
 
 /// Replace verified native ink with the complete editable snapshot. Annotations
@@ -248,8 +243,13 @@ pub(super) fn serialize_with_annotations(
     )?;
     sort_embedded_files(&document)?;
     let mut bytes = Vec::new();
+    // Lossless stream compression shrinks pressure APs; garbage collection drops
+    // replaced annotations/attachments instead of retaining every old snapshot.
+    // Level 1 preserves xref numbers used by standard-annotation verification.
+    let mut options = PdfWriteOptions::default();
+    options.set_compress(true).set_garbage_level(1);
     document
-        .write_to(&mut bytes)
+        .write_to_with_options(&mut bytes, options)
         .context("Serialize PDF save snapshot")?;
     let reopened = PdfDocument::from_bytes(&bytes)?;
     ensure!(
@@ -421,7 +421,6 @@ fn validate_stroke(stroke: &StrokeRecord, geometry: PageGeometry) -> Result<()> 
         !stroke.id.is_nil()
             && stroke.edit_transform.is_finite()
             && !stroke.modeled_samples.is_empty()
-            && !stroke.raw_samples.is_empty()
             && !stroke.outline.is_empty(),
         "Incomplete stroke record"
     );

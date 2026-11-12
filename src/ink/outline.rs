@@ -53,6 +53,23 @@ impl OutlineState {
     }
 }
 
+/// Versioned replay of confirmed geometry, shared with compact edit attachments.
+/// Keep this mapping stable: files marked `samples-v1` depend on these exact
+/// disks, joins, highlighter coalescing and endpoint handling.
+pub(crate) fn saved_outline_v1(samples: &[ModeledSample], style: &PenStyle) -> Vec<PathCommand> {
+    let mut path = Vec::new();
+    let mut state = OutlineState::default();
+    for sample in samples {
+        state.append(&mut path, sample, style, false);
+    }
+    if style.kind == crate::document::InkKind::Highlighter
+        && let Some(last) = samples.last()
+    {
+        state.append(&mut path, last, style, true);
+    }
+    path
+}
+
 // Round disks and connecting trapezoids use the same winding. Nonzero filling
 // combines them without seams and handles coincident samples without division.
 #[cfg(test)]

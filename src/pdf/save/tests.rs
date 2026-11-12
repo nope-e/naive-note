@@ -1,5 +1,6 @@
 //! Structural PDF/CBOR checks only. No rendering, pixels, windows or viewers.
 
+mod compact_saves;
 mod external_edits;
 mod large_edit_data;
 
@@ -40,7 +41,8 @@ fn moved_saved_objects_change_pdf_page_and_reopen_without_old_annotations() {
         for (s, original) in data.strokes.iter().zip(&objects) {
             assert_eq!(s.stroke.page_index, 1);
             assert_eq!(s.stroke.id, original.id);
-            assert_eq!(s.stroke.raw_samples, original.raw_samples);
+            assert!(s.stroke.raw_samples.is_empty());
+            assert!(!original.raw_samples.is_empty());
         }
         // Reopen and move back; later saving an undo also restores the old page.
         let mut reopened =
@@ -62,7 +64,7 @@ fn moved_saved_objects_change_pdf_page_and_reopen_without_old_annotations() {
         let document = PdfDocument::from_bytes(&undone).unwrap();
         let restored = read_edit_data(&document).unwrap().unwrap();
         for (s, original) in restored.strokes.iter().zip(&objects) {
-            assert_eq!(s.stroke, **original);
+            assert_eq!(s.stroke, without_capture(original));
         }
         assert_eq!(document.load_pdf_page(0).unwrap().annotations().count(), 3);
         assert_eq!(document.load_pdf_page(1).unwrap().annotations().count(), 0);
@@ -70,7 +72,7 @@ fn moved_saved_objects_change_pdf_page_and_reopen_without_old_annotations() {
 }
 
 #[test]
-fn transformed_reopened_ink_replaces_original_annotation_and_preserves_raw_capture() {
+fn transformed_reopened_ink_replaces_original_annotation_without_raw_capture() {
     use crate::document::InkTransform;
     use std::sync::Arc;
     for rotation in [0, 90, 180, 270] {
@@ -81,7 +83,8 @@ fn transformed_reopened_ink_replaces_original_annotation_and_preserves_raw_captu
                 record.style.kind = InkKind::Highlighter;
             }
             let id = Uuid::new_v4();
-            let (first, _) = serialize(&base, &[Arc::new(record.clone())], id).unwrap();
+            let (first, initial) = serialize(&base, &[Arc::new(record)], id).unwrap();
+            let record = &initial.strokes[0].stroke;
             let edited = record.transformed(InkTransform {
                 center: record.bounds().center(),
                 translation: Point::new(23., -17.),
@@ -92,7 +95,7 @@ fn transformed_reopened_ink_replaces_original_annotation_and_preserves_raw_captu
             let data = read_edit_data(&document).unwrap().unwrap();
             assert_eq!(data.strokes.len(), 1);
             assert_eq!(data.strokes[0].stroke, edited);
-            assert_eq!(data.strokes[0].stroke.raw_samples, record.raw_samples);
+            assert!(data.strokes[0].stroke.raw_samples.is_empty());
             assert_eq!(data.strokes[0].stroke.id, record.id);
             assert_eq!(document.load_pdf_page(0).unwrap().annotations().count(), 2);
             // Another edit over the saved PDF keeps one native object and its UUID.
@@ -235,6 +238,12 @@ fn fixture(rotation: i32) -> Vec<u8> {
 fn stroke_for(bytes: &[u8]) -> StrokeRecord {
     let document = PdfDocument::from_bytes(bytes).unwrap();
     pressure_stroke(page_geometry(&document.load_pdf_page(0).unwrap()).unwrap()).unwrap()
+}
+
+fn without_capture(stroke: &StrokeRecord) -> StrokeRecord {
+    let mut stroke = stroke.clone();
+    stroke.raw_samples.clear();
+    stroke
 }
 
 fn save_stroke(base: &[u8], stroke: &StrokeRecord, output: &Path) -> Result<()> {
@@ -452,7 +461,7 @@ fn strokes_can_leave_the_page_and_return_without_changing_samples_on_save() {
             );
             let data = read_edit_data(&reopened).unwrap().unwrap();
             assert_eq!(data.strokes.len(), 1);
-            assert_eq!(data.strokes[0].stroke, *stroke);
+            assert_eq!(data.strokes[0].stroke, without_capture(&stroke));
             let snapshot = data
                 .strokes
                 .iter()
@@ -476,7 +485,7 @@ fn pressure_ink_attachment_round_trips_with_rotated_cropped_scaled_pages_and_exi
         let document = PdfDocument::from_bytes(&fs::read(output).unwrap()).unwrap();
         let data = read_edit_data(&document).unwrap().unwrap();
         assert_eq!(data.strokes.len(), 1);
-        assert_eq!(data.strokes[0].stroke, stroke);
+        assert_eq!(data.strokes[0].stroke, without_capture(&stroke));
         assert_eq!(document.page_count().unwrap(), 2);
         assert_eq!(
             document
@@ -618,7 +627,7 @@ fn highlighter_appearance_round_trips_blending_and_detects_resource_tampering() 
     ink.push_mouse(Point::new(200., 100.), 1000, PenPhase::Up);
     let stroke = ink.finish().unwrap();
     let (bytes, data) = serialize(&base, std::slice::from_ref(&stroke), Uuid::new_v4()).unwrap();
-    assert_eq!(data.strokes[0].stroke, *stroke);
+    assert_eq!(data.strokes[0].stroke, without_capture(&stroke));
     let document = PdfDocument::from_bytes(&bytes).unwrap();
     let data = read_edit_data(&document).unwrap().unwrap();
     assert_eq!(data.strokes[0].stroke.style.kind, InkKind::Highlighter);
@@ -1006,7 +1015,7 @@ fn legacy_edit_attachment_without_reference_metadata_uses_the_fallback() {
     let mut cbor = Vec::new();
     ciborium::into_writer(
         &LegacyEditData {
-            format_version: FORMAT_VERSION,
+            format_version: 1,
             document_id: Uuid::new_v4(),
             strokes: Vec::new(),
         },

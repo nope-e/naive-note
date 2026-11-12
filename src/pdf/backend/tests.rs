@@ -723,7 +723,7 @@ fn reopening_after_external_deletion_keeps_other_ink_editable_and_restores_setti
         if delete_all {
             assert!(restored.strokes.is_empty());
         } else {
-            assert_eq!(restored.strokes[0].stroke, *second);
+            assert_eq!(restored.strokes[0], data.strokes[1]);
             assert_eq!(restored.strokes.len(), 1);
         }
         assert_eq!(session.first_page().unwrap().annotations().count(), 0);
