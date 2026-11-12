@@ -1,12 +1,12 @@
 //! Structural PDF/CBOR checks only. No rendering, pixels, windows or viewers.
 
 mod external_edits;
+mod large_edit_data;
 
 use std::path::PathBuf;
 
 use super::*;
 use crate::ink::test_support::pressure_stroke;
-use crate::pdf::edit_data::MAX_EDIT_BYTES;
 
 #[test]
 fn moved_saved_objects_change_pdf_page_and_reopen_without_old_annotations() {
@@ -808,7 +808,7 @@ fn signed_encrypted_and_invalid_records_are_rejected_before_creating_output() {
 }
 
 #[test]
-fn bounded_zstd_cbor_decoder_rejects_truncation_trailing_data_and_large_output() {
+fn zstd_cbor_decoder_rejects_truncation_and_trailing_data() {
     let directory = TestDirectory::new();
     let bytes = saved_fixture(&directory);
     let data = read_edit_data(&PdfDocument::from_bytes(&bytes).unwrap())
@@ -821,8 +821,6 @@ fn bounded_zstd_cbor_decoder_rejects_truncation_trailing_data_and_large_output()
     ciborium::into_writer(&data, &mut cbor).unwrap();
     cbor.push(0);
     assert!(EditData::decode(&zstd::stream::encode_all(cbor.as_slice(), 3).unwrap()).is_err());
-    let bomb = zstd::stream::encode_all(vec![0; MAX_EDIT_BYTES + 1].as_slice(), 1).unwrap();
-    assert!(EditData::decode(&bomb).is_err());
 }
 
 fn page_content(document: &PdfDocument, page: i32, references: bool) -> Vec<Vec<u8>> {

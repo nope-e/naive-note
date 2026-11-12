@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Context, Result, ensure};
 use mupdf::pdf::{PdfDocument, PdfObject};
 
-use crate::pdf::edit_data::{EditData, MAX_EDIT_BYTES, SavedStroke};
+use crate::pdf::edit_data::{EditData, SavedStroke};
 
 use super::{
     attachment_names, fingerprint, is_name, page_geometry, required, validate_stroke,
@@ -137,8 +137,8 @@ fn read_attachment(document: &PdfDocument) -> Result<Option<EditData>> {
         .context("Missing embedded file stream")?;
     if let Some(length) = stream.get_dict("Length")? {
         ensure!(
-            length.as_int()? >= 0 && length.as_int()? as usize <= MAX_EDIT_BYTES,
-            "Edit attachment exceeds the 8 MiB limit"
+            length.as_int()? >= 0,
+            "Invalid edit attachment length"
         );
     }
     let data = EditData::decode(&stream.read_stream()?)?;

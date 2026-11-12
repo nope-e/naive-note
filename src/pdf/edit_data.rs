@@ -1,4 +1,4 @@
-use std::io::{Cursor, Read};
+use std::io::{BufWriter, Cursor};
 
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,6 @@ use uuid::Uuid;
 use crate::document::{ReferenceLayer, StrokeRecord};
 
 pub(super) const FORMAT_VERSION: u32 = 1;
-pub(super) const MAX_EDIT_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(super) struct SavedStroke {
@@ -30,31 +29,21 @@ impl EditData {
     }
 
     pub fn encode(&self) -> Result<Vec<u8>> {
-        let mut cbor = Vec::new();
-        ciborium::into_writer(self, &mut cbor).context("Encode edit data as CBOR")?;
-        ensure!(
-            cbor.len() <= MAX_EDIT_BYTES,
-            "Edit data exceeds the 8 MiB limit"
-        );
-        zstd::stream::encode_all(cbor.as_slice(), 3).context("Compress edit data with Zstd")
+        // Stream CBOR into Zstd so large documents do not need an additional
+        // uncompressed copy of all capture samples and geometry during encoding.
+        let encoder = zstd::stream::write::Encoder::new(Vec::new(), 3)
+            .context("Create Zstd edit data encoder")?;
+        let mut writer = BufWriter::new(encoder);
+        ciborium::into_writer(self, &mut writer).context("Encode edit data as CBOR")?;
+        let encoder = writer
+            .into_inner()
+            .map_err(|error| error.into_error())
+            .context("Flush CBOR edit data")?;
+        encoder.finish().context("Compress edit data with Zstd")
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self> {
-        ensure!(
-            bytes.len() <= MAX_EDIT_BYTES,
-            "Compressed edit data exceeds the 8 MiB limit"
-        );
-        let mut decoder =
-            zstd::stream::read::Decoder::new(bytes).context("Invalid Zstd edit data")?;
-        decoder.window_log_max(23)?;
-        let mut cbor = Vec::new();
-        decoder
-            .take(MAX_EDIT_BYTES as u64 + 1)
-            .read_to_end(&mut cbor)?;
-        ensure!(
-            cbor.len() <= MAX_EDIT_BYTES,
-            "Decoded edit data exceeds the 8 MiB limit"
-        );
+        let cbor = zstd::stream::decode_all(bytes).context("Invalid Zstd edit data")?;
         let mut cursor = Cursor::new(&cbor);
         let data: Self = ciborium::from_reader(&mut cursor).context("Invalid CBOR edit data")?;
         ensure!(
