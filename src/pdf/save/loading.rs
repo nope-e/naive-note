@@ -136,10 +136,7 @@ fn read_attachment(document: &PdfDocument) -> Result<Option<EditData>> {
         .or(ef.get_dict("F")?)
         .context("Missing embedded file stream")?;
     if let Some(length) = stream.get_dict("Length")? {
-        ensure!(
-            length.as_int()? >= 0,
-            "Invalid edit attachment length"
-        );
+        ensure!(length.as_int()? >= 0, "Invalid edit attachment length");
     }
     let data = EditData::decode(&stream.read_stream()?)?;
     ensure!(

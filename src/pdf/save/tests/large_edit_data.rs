@@ -53,19 +53,28 @@ fn large_edit_data_saves_reopens_and_accepts_more_strokes() {
         .unwrap()
         .unwrap();
     assert!(attachment.len() > OLD_LIMIT);
-    assert!(zstd::stream::decode_all(attachment.as_slice()).unwrap().len() > OLD_LIMIT);
+    assert!(
+        zstd::stream::decode_all(attachment.as_slice())
+            .unwrap()
+            .len()
+            > OLD_LIMIT
+    );
     let fingerprint = crate::storage::save_atomic(&output, None, &bytes, |path| {
         verify_data(&read_pdf(path)?, &data)
     })
     .unwrap();
     let session = PdfSession::open(&output).unwrap();
-    assert_eq!(session.objects().len(), strokes.len());
-    for (loaded, expected) in session.objects().iter().zip(&strokes) {
-        assert_eq!(loaded.as_ref(), expected.as_ref());
-    }
+    let original_session = PdfSession::from_bytes(&base).unwrap();
+    assert_eq!(
+        session.annotation_sources().len(),
+        original_session.annotation_sources().len()
+    );
+    let loaded = PdfDocument::from_bytes(session.base()).unwrap();
+    assert_eq!(read_edit_data(&loaded).unwrap().unwrap(), data);
     // A second save starts from the large PDF and replaces trusted old ink.
     strokes.push(Arc::new(stroke_for(&base)));
-    let (extended, expected) = serialize(&read_pdf(&output).unwrap(), &strokes, document_id).unwrap();
+    let (extended, expected) =
+        serialize(&read_pdf(&output).unwrap(), &strokes, document_id).unwrap();
     crate::storage::save_atomic(&output, Some(fingerprint), &extended, |path| {
         verify_data(&read_pdf(path)?, &expected)
     })
