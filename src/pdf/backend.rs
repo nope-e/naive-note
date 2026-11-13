@@ -119,6 +119,10 @@ impl PdfSession {
         &self.annotation_sources
     }
 
+    pub(super) fn edit_data(&self) -> Option<&super::edit_data::EditData> {
+        self.edit_data.as_ref()
+    }
+
     pub fn set_reference_lines(&mut self, lines: ReferenceLines) {
         if self.reference_lines != lines {
             self.reference_lines = lines;

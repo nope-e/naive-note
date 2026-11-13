@@ -33,6 +33,7 @@ impl<'a> EditDataRef<'a> {
 struct SavedStrokeRef<'a> {
     stroke: StrokeRef<'a>,
     annotation_sha256: &'a str,
+    appearance_version: u32,
 }
 
 #[derive(Serialize)]
@@ -75,6 +76,7 @@ fn serialize_strokes<S: Serializer>(
                 processing: &stroke.processing,
             },
             annotation_sha256: &saved.annotation_sha256,
+            appearance_version: saved.appearance_version,
         })?;
     }
     sequence.end()
@@ -119,6 +121,8 @@ impl<'de> Deserialize<'de> for SavedStroke {
         struct StoredSavedStroke {
             stroke: StoredStroke,
             annotation_sha256: String,
+            #[serde(default = "legacy_appearance_version")]
+            appearance_version: u32,
         }
         let saved = StoredSavedStroke::deserialize(deserializer)?;
         let mut stroke = saved.stroke.stroke;
@@ -133,8 +137,13 @@ impl<'de> Deserialize<'de> for SavedStroke {
         Ok(Self {
             stroke,
             annotation_sha256: saved.annotation_sha256,
+            appearance_version: saved.appearance_version,
         })
     }
+}
+
+fn legacy_appearance_version() -> u32 {
+    1
 }
 
 #[cfg(test)]
@@ -213,5 +222,9 @@ mod tests {
         omitted.outline.clear();
         assert!(decode(&omitted, "samples-v999").is_err());
         assert_eq!(decode(&omitted, "samples-v1").unwrap().stroke, original);
+        assert_eq!(
+            decode(&omitted, "samples-v1").unwrap().appearance_version,
+            1
+        );
     }
 }

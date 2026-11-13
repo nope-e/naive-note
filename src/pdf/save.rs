@@ -1,6 +1,7 @@
 //! Standard Ink annotations, pressure appearances and verified full-copy serialization.
 
 mod loading;
+mod outline;
 
 pub(super) use loading::{load_edit_data, read_edit_data};
 
@@ -11,7 +12,8 @@ use mupdf::{
     Buffer,
     color::AnnotationColor,
     pdf::{
-        AnnotationFlags, EmbeddedFileOptions, PdfDocument, PdfObject, PdfWriteOptions, Permission,
+        AnnotationFlags, EmbeddedFileOptions, PdfDocument, PdfObject, PdfPage, PdfWriteOptions,
+        Permission,
     },
 };
 use sha2::{Digest, Sha256};
@@ -73,12 +75,28 @@ fn ensure_writable(document: &PdfDocument) -> Result<()> {
     Ok(())
 }
 
-fn add_stroke(document: &mut PdfDocument, stroke: &StrokeRecord) -> Result<SavedStroke> {
+#[cfg(test)]
+fn add_stroke_version(
+    document: &mut PdfDocument,
+    stroke: &StrokeRecord,
+    version: u32,
+) -> Result<SavedStroke> {
     let mut page = document.load_pdf_page(i32::try_from(stroke.page_index)?)?;
     let geometry = page_geometry(&page)?;
+    add_stroke_on_page(document, &mut page, geometry, stroke, version)
+}
+
+fn add_stroke_on_page(
+    document: &mut PdfDocument,
+    page: &mut PdfPage,
+    geometry: PageGeometry,
+    stroke: &StrokeRecord,
+    version: u32,
+) -> Result<SavedStroke> {
     validate_stroke(stroke, geometry)?;
-    let centerline: Vec<_> = stroke
-        .modeled_samples
+    let prepared = outline::for_pdf(stroke, version);
+    let centerline: Vec<_> = prepared
+        .samples
         .iter()
         .map(|s| mupdf::Point::new(s.position.x as f32, s.position.y as f32))
         .collect();
@@ -96,7 +114,7 @@ fn add_stroke(document: &mut PdfDocument, stroke: &StrokeRecord) -> Result<Saved
     // First clear MuPDF's pending appearance regeneration, then install the
     // final custom Form XObject. No semantic setter may run after this point.
     annotation.update()?;
-    let (rect, contents) = appearance(stroke, geometry)?;
+    let (rect, contents) = appearance(stroke, geometry, &prepared.outline)?;
     object.dict_put("Rect", numbers(document, &rect)?)?;
     let mut form = document.new_dict()?;
     form.dict_put("Type", PdfObject::new_name("XObject")?)?;
@@ -123,13 +141,11 @@ fn add_stroke(document: &mut PdfDocument, stroke: &StrokeRecord) -> Result<Saved
     let mut ap = document.new_dict()?;
     ap.dict_put("N", stream)?;
     object.dict_put("AP", ap)?;
-    // This deliberately exercises the update path that could overwrite /AP.
-    page.update()?;
-    ensure!(
-        normal_appearance(&object)?.read_stream()? == contents.as_bytes(),
-        "MuPDF replaced the pressure appearance during page update"
-    );
-    Ok(SavedStroke::new(stroke, fingerprint(&object)?))
+    // Update the whole page once after the batch, rather than visiting every
+    // preceding annotation again for every stroke. Read-back checks its AP hash.
+    let mut saved = SavedStroke::new(stroke, fingerprint(&object)?);
+    saved.appearance_version = version;
+    Ok(saved)
 }
 
 /// Replace verified native ink with the complete editable snapshot. Annotations
@@ -161,10 +177,52 @@ pub(super) fn serialize_with_annotations(
     appended_pages: &[PageGeometry],
     annotation_sources: &[std::sync::Arc<crate::document::PdfAnnotationSource>],
 ) -> Result<(Vec<u8>, EditData)> {
-    let mut document = PdfDocument::from_bytes(base)?;
+    let document = PdfDocument::from_bytes(base)?;
     ensure_writable(&document)?;
     let (previous, _) = load_edit_data(&document);
-    if let Some(data) = &previous {
+    serialize_document(
+        document,
+        strokes,
+        document_id,
+        reference_lines,
+        appended_pages,
+        annotation_sources,
+        previous.as_ref(),
+    )
+}
+
+/// The worker's immutable source has already been checked when it was opened.
+/// Reuse that result instead of decoding and rebuilding all old ink every save.
+pub(super) fn serialize_session(
+    session: &super::backend::PdfSession,
+    strokes: &[std::sync::Arc<StrokeRecord>],
+    document_id: Uuid,
+    reference_lines: ReferenceLayer,
+    appended_pages: &[PageGeometry],
+) -> Result<(Vec<u8>, EditData)> {
+    let document = PdfDocument::from_bytes(session.base())?;
+    ensure_writable(&document)?;
+    serialize_document(
+        document,
+        strokes,
+        document_id,
+        reference_lines,
+        appended_pages,
+        session.annotation_sources(),
+        session.edit_data(),
+    )
+}
+
+fn serialize_document(
+    mut document: PdfDocument,
+    strokes: &[std::sync::Arc<StrokeRecord>],
+    document_id: Uuid,
+    reference_lines: ReferenceLayer,
+    appended_pages: &[PageGeometry],
+    annotation_sources: &[std::sync::Arc<crate::document::PdfAnnotationSource>],
+    previous: Option<&EditData>,
+) -> Result<(Vec<u8>, EditData)> {
+    if let Some(data) = previous {
         remove_editable_ink(&document, data)?;
     }
     for geometry in appended_pages {
@@ -180,10 +238,7 @@ pub(super) fn serialize_with_annotations(
     // If private settings are unavailable and the user has kept the plain-PDF
     // defaults, existing reference vectors are ordinary source content. Do not
     // strip them or claim that we can reconstruct their settings on reopening.
-    let preserve_references = previous
-        .as_ref()
-        .and_then(|data| data.reference_lines)
-        .is_none()
+    let preserve_references = previous.and_then(|data| data.reference_lines).is_none()
         && reference_lines
             == ReferenceLayer {
                 lines: crate::document::ReferenceLines {
@@ -217,6 +272,7 @@ pub(super) fn serialize_with_annotations(
     for index in 0..document.page_count()? {
         counts[index as usize] = document.load_pdf_page(index)?.annotations().count();
     }
+    let mut active_page = None;
     for stroke in strokes {
         if stroke.pdf_annotation.is_some() {
             continue;
@@ -224,8 +280,27 @@ pub(super) fn serialize_with_annotations(
         ensure!(ids.insert(stroke.id), "Duplicate stroke UUID");
         let index = stroke.page_index as usize;
         ensure!(index < counts.len(), "Stroke page is out of range");
-        data.strokes.push(add_stroke(&mut document, stroke)?);
+        if active_page
+            .as_ref()
+            .is_none_or(|(index, _, _)| *index != stroke.page_index)
+        {
+            let page = document.load_pdf_page(i32::try_from(stroke.page_index)?)?;
+            let geometry = page_geometry(&page)?;
+            active_page = Some((stroke.page_index, page, geometry));
+        }
+        let (_, page, geometry) = active_page.as_mut().expect("stroke page loaded");
+        data.strokes.push(add_stroke_on_page(
+            &mut document,
+            page,
+            *geometry,
+            stroke,
+            2,
+        )?);
         counts[index] += 1;
+    }
+    drop(active_page);
+    for index in 0..document.page_count()? {
+        document.load_pdf_page(index)?.update()?;
     }
     if !annotation_sources.is_empty() {
         super::annotations::order_objects(&document, annotation_sources, strokes)?;
@@ -269,7 +344,7 @@ pub(super) fn serialize_with_annotations(
         );
     }
     super::annotations::verify_saved(&document, &reopened, annotation_sources)?;
-    verify_data(&bytes, &data)?;
+    verify_document_data(&reopened, &data)?;
     Ok((bytes, data))
 }
 
@@ -297,10 +372,15 @@ pub(super) fn remove_editable_ink(document: &PdfDocument, data: &EditData) -> Re
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn verify_data(bytes: &[u8], expected: &EditData) -> Result<()> {
     let reopened = PdfDocument::from_bytes(bytes)?;
+    verify_document_data(&reopened, expected)
+}
+
+fn verify_document_data(document: &PdfDocument, expected: &EditData) -> Result<()> {
     ensure!(
-        read_edit_data(&reopened)? == Some(expected.clone()),
+        read_edit_data(document)?.as_ref() == Some(expected),
         "Saved edit data does not match"
     );
     Ok(())
@@ -466,7 +546,11 @@ fn validate_stroke(stroke: &StrokeRecord, geometry: PageGeometry) -> Result<()> 
     Ok(())
 }
 
-fn appearance(stroke: &StrokeRecord, geometry: PageGeometry) -> Result<([f64; 4], String)> {
+fn appearance(
+    stroke: &StrokeRecord,
+    geometry: PageGeometry,
+    outline: &[PathCommand],
+) -> Result<([f64; 4], String)> {
     let mut bounds = [
         f64::INFINITY,
         f64::INFINITY,
@@ -492,7 +576,7 @@ fn appearance(stroke: &StrokeRecord, geometry: PageGeometry) -> Result<([f64; 4]
         bounds[3] = bounds[3].max(pdf.y);
         Ok(pdf)
     };
-    for command in &stroke.outline {
+    for command in outline.iter() {
         match *command {
             PathCommand::MoveTo(p) => {
                 let p = point(p)?;
@@ -538,15 +622,21 @@ fn verify_geometry(
     object: &PdfObject,
     stroke: &StrokeRecord,
     geometry: PageGeometry,
+    appearance_version: u32,
 ) -> Result<()> {
+    ensure!(
+        (1..=2).contains(&appearance_version),
+        "Unsupported ink appearance version"
+    );
+    let prepared = outline::for_pdf(stroke, appearance_version);
     let list = required(object, "InkList")?;
     ensure!(list.len()? == 1, "Unexpected InkList stroke count");
     let points = list.get_array(0)?.context("Missing InkList points")?;
     ensure!(
-        points.len()? == stroke.modeled_samples.len() * 2,
+        points.len()? == prepared.samples.len() * 2,
         "Unexpected InkList point count"
     );
-    for (i, sample) in stroke.modeled_samples.iter().enumerate() {
+    for (i, sample) in prepared.samples.iter().enumerate() {
         let expected = geometry.paper_to_pdf(sample.position);
         for (j, value) in [expected.x, expected.y].into_iter().enumerate() {
             let actual = points
@@ -559,7 +649,7 @@ fn verify_geometry(
             );
         }
     }
-    let (rect, contents) = appearance(stroke, geometry)?;
+    let (rect, contents) = appearance(stroke, geometry, &prepared.outline)?;
     let ap = normal_appearance(object)?;
     if stroke.style.kind == InkKind::Highlighter {
         let state = required(

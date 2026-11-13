@@ -8,12 +8,14 @@ use crate::document::{ReferenceLayer, StrokeRecord};
 
 mod compact;
 
-pub(super) const FORMAT_VERSION: u32 = 3;
+pub(super) const FORMAT_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub(super) struct SavedStroke {
     pub stroke: StrokeRecord,
     pub annotation_sha256: String,
+    /// Version 1 uses the full outline; version 2 bounds PDF appearance error.
+    pub appearance_version: u32,
 }
 
 impl SavedStroke {
@@ -35,6 +37,7 @@ impl SavedStroke {
                 processing: stroke.processing.clone(),
             },
             annotation_sha256,
+            appearance_version: 2,
         }
     }
 }

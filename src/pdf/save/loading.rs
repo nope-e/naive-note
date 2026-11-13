@@ -115,7 +115,7 @@ fn verify_stroke(
         "Annotation fingerprint mismatch for {}",
         saved.stroke.id
     );
-    verify_geometry(object, &saved.stroke, geometry)
+    verify_geometry(object, &saved.stroke, geometry, saved.appearance_version)
 }
 
 fn read_attachment(document: &PdfDocument) -> Result<Option<EditData>> {

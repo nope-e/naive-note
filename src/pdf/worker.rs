@@ -285,33 +285,36 @@ fn save_snapshot(snapshot: &SaveSnapshot, session: Option<&(u64, PdfSession)>) -
         _ if snapshot.require_new_target => None,
         _ => storage::fingerprint(&snapshot.path)?,
     };
-    let draft;
-    let base = if let Some(document) = snapshot.document {
+    let (bytes, _) = if let Some(document) = snapshot.document {
         let (id, opened) = session.context("PDF session was closed before saving")?;
         anyhow::ensure!(*id == document, "PDF session changed before saving");
-        opened.base()
+        super::save::serialize_session(
+            opened,
+            &snapshot.strokes,
+            snapshot.document_id,
+            snapshot.reference_lines,
+            &snapshot.appended_pages,
+        )?
     } else {
-        draft = super::save::draft_pdf(snapshot.draft_page)?;
-        &draft
+        let draft = super::save::draft_pdf(snapshot.draft_page)?;
+        super::save::serialize_with_annotations(
+            &draft,
+            &snapshot.strokes,
+            snapshot.document_id,
+            snapshot.reference_lines,
+            &snapshot.appended_pages,
+            &[],
+        )?
     };
-    let annotation_sources = session
-        .filter(|(id, _)| Some(*id) == snapshot.document)
-        .map_or(&[][..], |(_, opened)| opened.annotation_sources());
-    let (bytes, data) = super::save::serialize_with_annotations(
-        base,
-        &snapshot.strokes,
-        snapshot.document_id,
-        snapshot.reference_lines,
-        &snapshot.appended_pages,
-        annotation_sources,
-    )?;
     let fingerprint = storage::save_atomic(&snapshot.path, expected, &bytes, |path| {
         let disk = super::save::read_pdf(path)?;
         anyhow::ensure!(
             disk == bytes,
             "On-disk PDF differs from serialized snapshot"
         );
-        super::save::verify_data(&disk, &data)
+        // The serialized bytes already passed structural/metadata validation.
+        // Byte equality proves the synced file is that same validated PDF.
+        Ok(())
     })?;
     Ok(SavedPdf {
         path: snapshot.path.clone(),

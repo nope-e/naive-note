@@ -3,6 +3,58 @@
 mod compact_saves;
 mod external_edits;
 mod large_edit_data;
+mod performance;
+
+#[test]
+fn optimized_session_save_preserves_exact_edits_and_matches_the_checked_writer() {
+    use std::sync::Arc;
+    for rotation in [0, 90, 180, 270] {
+        let base = fixture(rotation);
+        let stroke = Arc::new(stroke_for(&base));
+        let id = Uuid::new_v4();
+        let (legacy, _) = compact_saves::legacy_serialize(&base, &[stroke], id);
+        let session = super::super::backend::PdfSession::from_bytes(&legacy).unwrap();
+        let data = session.edit_data().unwrap();
+        assert_eq!(data.strokes[0].appearance_version, 1);
+        let edited = Arc::new(
+            data.strokes[0]
+                .stroke
+                .transformed(crate::document::InkTransform {
+                    translation: Point::new(7., -9.),
+                    radians: 0.42,
+                    ..Default::default()
+                }),
+        );
+        let layer = data.reference_lines.unwrap();
+        let (mut saved, fast) =
+            serialize_session(&session, std::slice::from_ref(&edited), id, layer, &[]).unwrap();
+        let (_, checked) = serialize_with_annotations(
+            &legacy,
+            std::slice::from_ref(&edited),
+            id,
+            layer,
+            &[],
+            session.annotation_sources(),
+        )
+        .unwrap();
+        assert_eq!(fast, checked);
+        assert_eq!(fast.strokes[0].stroke, without_capture(&edited));
+        assert_eq!(fast.strokes[0].appearance_version, 2);
+        let mut reopened = edited.clone();
+        for _ in 0..2 {
+            let (again, data) = serialize(&saved, &[reopened], id).unwrap();
+            assert_eq!(data.strokes[0].stroke, without_capture(&edited));
+            assert_eq!(
+                read_edit_data(&PdfDocument::from_bytes(&again).unwrap())
+                    .unwrap()
+                    .unwrap(),
+                data
+            );
+            reopened = Arc::new(data.strokes[0].stroke.clone());
+            saved = again;
+        }
+    }
+}
 
 use std::path::PathBuf;
 

@@ -27,7 +27,7 @@ fn previous_serialize(
         strokes: strokes
             .iter()
             .map(|stroke| {
-                let mut saved = add_stroke(&mut document, stroke).unwrap();
+                let mut saved = add_stroke_version(&mut document, stroke, 1).unwrap();
                 if version == 1 {
                     saved.stroke = (**stroke).clone();
                 }
@@ -108,7 +108,7 @@ fn thousand_strokes_shrink_without_changing_confirmed_geometry_or_live_capture()
     );
     let (bytes, data) = serialize(&base, &strokes, id).unwrap();
     println!(
-        "1000 strokes: original {} bytes, v2 {} bytes, v3 {} bytes ({:.1}% smaller than v2)",
+        "1000 strokes: original {} bytes, v2 {} bytes, current {} bytes ({:.1}% smaller than v2)",
         legacy.len(),
         previous.len(),
         bytes.len(),
@@ -116,7 +116,7 @@ fn thousand_strokes_shrink_without_changing_confirmed_geometry_or_live_capture()
     );
     assert!(bytes.len() < legacy.len() / 2);
     assert!(bytes.len() < previous.len());
-    assert_eq!(data.format_version, 3);
+    assert_eq!(data.format_version, FORMAT_VERSION);
     for (saved, original) in data.strokes.iter().zip(&strokes) {
         assert_eq!(saved.stroke, without_capture(original));
         assert_eq!(original.raw_samples, template.raw_samples);
